@@ -16,7 +16,7 @@ class URL:
         s.connect((self.host, 80))
         
         request = f"GET {self.path} HTTP/1.0\r\n"
-        request += f"HOST {self.host}\r\n"
+        request += f"HOST: {self.host}\r\n"
         request += "\r\n"
         s.send(request.encode("utf8"))
 
