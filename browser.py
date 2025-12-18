@@ -2,6 +2,8 @@ import socket
 
 class URL:
     def __init__(self, url):
+        if not url.endswith('/'):
+            url += '/'
         self.scheme, url = url.split('://', 1)
         assert self.scheme == 'http'
         
