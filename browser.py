@@ -36,6 +36,8 @@ class URL:
         
         request = f"GET {self.path} HTTP/1.0\r\n"
         request += f"HOST: {self.host}\r\n"
+        request += "Connection: close\r\n"
+        request += "User-Agent: Nabin\r\n"
         request += "\r\n"
         s.send(request.encode("utf8"))
 
@@ -43,6 +45,8 @@ class URL:
 
         statusline = response.readline()
         version, status, explanation = statusline.split(" ", 2)
+
+        print(f"version: {version}, status: {status} and explanation: {explanation}")
 
         response_headers = {}
 
