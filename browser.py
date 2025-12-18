@@ -1,11 +1,17 @@
 import socket
+import ssl
 
 class URL:
     def __init__(self, url):
         if not url.endswith('/'):
             url += '/'
         self.scheme, url = url.split('://', 1)
-        assert self.scheme == 'http'
+        assert self.scheme in ['http', 'https']
+
+        if self.scheme == 'http':
+            self.port = 80
+        elif self.scheme == 'https':
+            self.port = 443
         
         self.host, url = url.split('/', 1)
         self.path = '/' + url
