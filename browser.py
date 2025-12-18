@@ -12,11 +12,16 @@ class URL:
         else:
             self.port = 443
         
-        if not url.endswith('/'):
-            url += '/'
-        
-        self.host, url = url.split('/', 1)
-        self.path = '/' + url
+        if '/' in url:
+            self.host, url = url.split('/', 1)
+            self.path = '/' + url
+        else:
+            self.host = url
+            self.path = '/'
+
+        if ':' in self.host:
+            self.host, port = self.host.split(':', 1)
+            self.port = int(port)
 
         print(f"protocol is: {self.scheme}, host is: {self.host}, path is: {self.path}")
 
