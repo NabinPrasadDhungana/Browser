@@ -96,8 +96,11 @@ FONTS = {}
 def get_font(weight, slant, size):
     key = (weight, slant, size)
     if key not in FONTS:
-        FONTS[key] = tkinter.font.Font(size=size, weight=weight, slant=slant)
-    return FONTS[key]
+        font = tkinter.font.Font(size=size, weight=weight,
+            slant=slant)
+        label = tkinter.Label(font=font)
+        FONTS[key] = (font, label)
+    return FONTS[key][0]
 
 class Layout:
     def __init__(self, tokens, width):
@@ -109,7 +112,7 @@ class Layout:
         self.width = width
         self.size = 12
         self.line = []
-        
+
         for tok in tokens:
             self.token(tok)
         self.flush()
