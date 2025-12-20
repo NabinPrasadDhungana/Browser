@@ -1,15 +1,21 @@
 import socket
 import ssl
+import os
 
 class URL:
     def __init__(self, url):
+        if url.startswith("data:"):
+            self.scheme, url = url.split(":", 1)
+            self.path = url
+            return
+
         self.scheme, url = url.split('://', 1)
-        if self.scheme not in ('http', 'https'):
+        if self.scheme not in ('http', 'https', 'file'):
             raise ValueError(f"Unsupported scheme: {self.scheme}")
 
         if self.scheme == 'http':
             self.port = 80
-        else:
+        elif self.scheme == 'https':
             self.port = 443
         
         if '/' in url:
@@ -26,6 +32,15 @@ class URL:
         print(f"protocol is: {self.scheme}, host is: {self.host}, path is: {self.path}")
 
     def request(self):
+        if self.scheme == "file":
+            if os.path.isdir(self.path):
+                return "\n".join(os.listdir(self.path))
+            with open(self.path, "r", encoding="utf8") as f:
+                return f.read()
+        
+        if self.scheme == "data":
+            return self.path.split(",", 1)[1]
+
         s = socket.socket()
 
         s.connect((self.host, self.port))
@@ -65,19 +80,21 @@ class URL:
 
         return content
     
-def show(body):
+def lex(body):
     in_tag = False
+    text = ""
     for c in body:
         if c == "<":
             in_tag = True
         elif c == ">":
             in_tag = False
         elif not in_tag:
-            print(c, end="")
+            text += c
+    return text
 
 def load(url):
     body = url.request()
-    show(body)
+    lex(body)
 
 if __name__ == "__main__":
     import sys
