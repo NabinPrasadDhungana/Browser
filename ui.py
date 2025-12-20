@@ -35,10 +35,32 @@ class Browser:
             if y > self.scroll + self.height: continue
             if y + VSTEP < self.scroll: continue
             self.canvas.create_text(x, y - self.scroll, text=c)
+        
+        self.draw_scrollbar()
+
+    def draw_scrollbar(self):
+        if not self.display_list:
+            return
+            
+        content_height = self.display_list[-1][1] + VSTEP
+        if content_height <= self.height:
+            return
+            
+        scrollbar_width = 12
+        scrollbar_height = (self.height / content_height) * self.height
+        scrollbar_y = (self.scroll / content_height) * self.height
+        
+        self.canvas.create_rectangle(
+            self.width - scrollbar_width, scrollbar_y,
+            self.width, scrollbar_y + scrollbar_height,
+            fill="blue", outline=""
+        )
 
     def scrolldown(self, e):
-        print(self.display_list[-1][1], self.scroll + self.height)
-        if self.scroll + self.height < self.display_list[-1][1]:
+        if not self.display_list:
+            return
+        max_y = self.display_list[-1][1]
+        if self.scroll + self.height < max_y:
             self.scroll += SCROLL_STEP
             self.draw()
 
@@ -48,12 +70,15 @@ class Browser:
             self.draw()
 
     def mousewheel(self, e):
+        if not self.display_list:
+            return
         if e.num == 4 or e.delta > 0:
             if not self.scroll <=0:
                 self.scroll -= SCROLL_STEP
                 self.draw()
         elif e.num == 5 or e.delta < 0:
-            if self.scroll + self.height < self.display_list[-1][1]:
+            max_y = self.display_list[-1][1]
+            if self.scroll + self.height < max_y:
                 self.scroll += SCROLL_STEP
                 self.draw()
 
