@@ -92,17 +92,25 @@ class URL:
 
         return content
     
+
 def lex(body):
+    out = []
+    buffer = ""
     in_tag = False
-    text = ""
     for c in body:
         if c == "<":
             in_tag = True
+            if buffer: out.append(Text(buffer))
+            buffer = ""
         elif c == ">":
             in_tag = False
-        elif not in_tag:
-            text += c
-    return text
+            out.append(Tag(buffer))
+            buffer = ""
+        else:
+            buffer += c
+    if not in_tag and buffer:
+        out.append(Text(buffer))
+    return out
 
 def load(url):
     body = url.request()
@@ -115,7 +123,7 @@ class Text:
 class Tag:
     def __init__(self, tag):
         self.tag = tag
-        
+
 if __name__ == "__main__":
     import sys
     load(URL(sys.argv[1]))

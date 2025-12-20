@@ -1,6 +1,7 @@
 import tkinter
 from browser import URL, lex
 import tkinter.font
+from browser import Text, Tag
 
 WIDTH = 800
 HEIGHT = 600 
@@ -26,16 +27,16 @@ class Browser:
 
     def load(self, url):
         body = url.request()
-        self.text = lex(body)
-        self.display_list = layout(self.text, self.width)
+        self.tokens = lex(body)
+        self.display_list = Layout(self.tokens, self.width).display_list
         self.draw()
 
     def draw(self):
         self.canvas.delete("all")
-        for x, y, c in self.display_list:
+        for x, y, c, font in self.display_list:
             if y > self.scroll + self.height: continue
             if y + VSTEP < self.scroll: continue
-            self.canvas.create_text(x, y - self.scroll, text=c, anchor="nw")
+            self.canvas.create_text(x, y - self.scroll, text=c, anchor="nw", font=font)
         
         self.draw_scrollbar()
 
@@ -86,28 +87,89 @@ class Browser:
     def on_configure(self, e):
         self.width = e.width
         self.height = e.height
-        if hasattr(self, 'text'):
-            self.display_list = layout(self.text, self.width)
+        if hasattr(self, 'tokens'):
+            self.display_list = Layout(self.tokens, self.width).display_list
             self.draw()
 
-def layout(text, width):
-    display_list = []
-    font = tkinter.font.Font()
-    cursor_x, cursor_y = HSTEP, VSTEP
-    for word in text.split():
+FONTS = {}
+
+def get_font(weight, slant, size):
+    key = (weight, slant, size)
+    if key not in FONTS:
+        FONTS[key] = tkinter.font.Font(size=size, weight=weight, slant=slant)
+    return FONTS[key]
+
+class Layout:
+    def __init__(self, tokens, width):
+        self.display_list = []
+        self.cursor_x = HSTEP
+        self.cursor_y = VSTEP
+        self.weight = "normal"
+        self.style = "roman"
+        self.width = width
+        self.size = 12
+        self.line = []
+        
+        for tok in tokens:
+            self.token(tok)
+        self.flush()
+
+    def token(self, tok):
+        if isinstance(tok, Text):
+            for word in tok.text.split():
+                self.word(word)
+        elif tok.tag == "i":
+            self.style = "italic"
+        elif tok.tag == "/i":
+            self.style = "roman"
+        elif tok.tag == "b":
+            self.weight = "bold"
+        elif tok.tag == "/b":
+            self.weight = "normal"
+        elif tok.tag == "small":
+            self.size -= 2
+        elif tok.tag == "/small":
+            self.size += 2
+        elif tok.tag == "big":
+            self.size += 4
+        elif tok.tag == "/big":
+            self.size -= 4
+        elif tok.tag == "br":
+            self.flush()
+        elif tok.tag == "/p":
+            self.flush()
+            self.cursor_y += VSTEP
+
+        return self.display_list
+    
+    def word(self, word):
+        font = get_font(self.weight, self.style, self.size)
         w = font.measure(word)
+                
         if word == '\n':
-            cursor_y += VSTEP * 2
-            cursor_x = HSTEP
-            continue
+            self.flush()
+            self.cursor_y += VSTEP
+            return
 
-        display_list.append((cursor_x, cursor_y, word))   
-        cursor_x += w + font.measure(" ")
-        if cursor_x + w >= width - HSTEP:
-            cursor_y += font.metrics("linespace") * 1
-            cursor_x = HSTEP
+        if self.cursor_x + w > self.width - HSTEP:
+            self.flush()
 
-    return display_list
+        self.line.append((self.cursor_x, word, font))
+        self.cursor_x += w + font.measure(" ")
+
+    def flush(self):
+        if not self.line: return
+        metrics = [font.metrics() for x, word, font in self.line]
+        max_ascent = max([metric["ascent"] for metric in metrics])
+        baseline = self.cursor_y + 1.25 * max_ascent
+        for x, word, font in self.line:
+            y = baseline - font.metrics("ascent")
+            self.display_list.append((x, y, word, font))
+        max_descent = max([metric["descent"] for metric in metrics])
+        self.cursor_y = baseline + 1.25 * max_descent
+
+        self.cursor_x = HSTEP
+        self.line = []
 
 if __name__ == '__main__':
     import sys
