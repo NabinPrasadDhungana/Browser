@@ -1,5 +1,6 @@
 import tkinter
 from browser import URL, lex
+import tkinter.font
 
 WIDTH = 800
 HEIGHT = 600 
@@ -34,7 +35,7 @@ class Browser:
         for x, y, c in self.display_list:
             if y > self.scroll + self.height: continue
             if y + VSTEP < self.scroll: continue
-            self.canvas.create_text(x, y - self.scroll, text=c)
+            self.canvas.create_text(x, y - self.scroll, text=c, anchor="nw")
         
         self.draw_scrollbar()
 
@@ -91,17 +92,19 @@ class Browser:
 
 def layout(text, width):
     display_list = []
+    font = tkinter.font.Font()
     cursor_x, cursor_y = HSTEP, VSTEP
-    for c in text:
-        if c == '\n':
+    for word in text.split():
+        w = font.measure(word)
+        if word == '\n':
             cursor_y += VSTEP * 2
             cursor_x = HSTEP
             continue
 
-        display_list.append((cursor_x, cursor_y, c))   
-        cursor_x += HSTEP
-        if cursor_x >= width - HSTEP:
-            cursor_y += VSTEP
+        display_list.append((cursor_x, cursor_y, word))   
+        cursor_x += w + font.measure(" ")
+        if cursor_x + w >= width - HSTEP:
+            cursor_y += font.metrics("linespace") * 1
             cursor_x = HSTEP
 
     return display_list

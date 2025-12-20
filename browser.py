@@ -108,6 +108,14 @@ def load(url):
     body = url.request()
     lex(body)
 
+class Text:
+    def __init__(self, text):
+        self.text = text
+
+class Tag:
+    def __init__(self, tag):
+        self.tag = tag
+        
 if __name__ == "__main__":
     import sys
     load(URL(sys.argv[1]))
