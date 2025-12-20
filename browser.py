@@ -4,32 +4,41 @@ import os
 
 class URL:
     def __init__(self, url):
-        if url.startswith("data:"):
-            self.scheme, url = url.split(":", 1)
-            self.path = url
-            return
+        try:
+            if url == "about:blank":
+                self.scheme = "about"
+                self.path = "blank"
+                return
 
-        self.scheme, url = url.split('://', 1)
-        if self.scheme not in ('http', 'https', 'file'):
-            raise ValueError(f"Unsupported scheme: {self.scheme}")
+            if url.startswith("data:"):
+                self.scheme, url = url.split(":", 1)
+                self.path = url
+                return
 
-        if self.scheme == 'http':
-            self.port = 80
-        elif self.scheme == 'https':
-            self.port = 443
-        
-        if '/' in url:
-            self.host, url = url.split('/', 1)
-            self.path = '/' + url
-        else:
-            self.host = url
-            self.path = '/'
+            self.scheme, url = url.split('://', 1)
+            if self.scheme not in ('http', 'https', 'file'):
+                raise ValueError(f"Unsupported scheme: {self.scheme}")
 
-        if ':' in self.host:
-            self.host, port = self.host.split(':', 1)
-            self.port = int(port)
+            if self.scheme == 'http':
+                self.port = 80
+            elif self.scheme == 'https':
+                self.port = 443
+            
+            if '/' in url:
+                self.host, url = url.split('/', 1)
+                self.path = '/' + url
+            else:
+                self.host = url
+                self.path = '/'
 
-        print(f"protocol is: {self.scheme}, host is: {self.host}, path is: {self.path}")
+            if ':' in self.host:
+                self.host, port = self.host.split(':', 1)
+                self.port = int(port)
+
+            print(f"protocol is: {self.scheme}, host is: {self.host}, path is: {self.path}")
+        except Exception:
+            self.scheme = "about"
+            self.path = "blank"
 
     def request(self):
         if self.scheme == "file":
@@ -40,6 +49,9 @@ class URL:
         
         if self.scheme == "data":
             return self.path.split(",", 1)[1]
+
+        if self.scheme == "about":
+            return ""
 
         s = socket.socket()
 
