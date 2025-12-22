@@ -38,7 +38,7 @@ class Browser:
     def draw(self):
         self.canvas.delete("all")
         for cmd in self.display_list:
-            if cmd.top > self.scroll + HEIGHT: continue
+            if cmd.top > self.scroll + self.height: continue
             if cmd.bottom < self.scroll: continue
             cmd.execute(self.scroll, self.canvas)
         
@@ -63,7 +63,7 @@ class Browser:
         )
 
     def scrolldown(self, e):
-        max_y = max(self.document.height + 2*VSTEP - HEIGHT, 0)
+        max_y = max(self.document.height + 2*VSTEP - self.height, 0)
         self.scroll = min(self.scroll + SCROLL_STEP, max_y)
         self.draw()
 
@@ -86,6 +86,7 @@ class Browser:
                 self.draw()
 
     def on_configure(self, e):
+        if e.widget != self.window: return
         self.width = e.width
         self.height = e.height
         if hasattr(self, 'nodes'):
