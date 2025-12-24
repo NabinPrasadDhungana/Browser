@@ -532,7 +532,6 @@ class BlockLayout:
         size = int(float(node.parent.style["font-size"][:-2]) * 0.75)
         font = get_font(weight, style, size)
         w = font.measure(word)
-        # Check if word fits, if not, wrap to new line first
         if self.cursor_x + w > self.width:
             self.new_line()
         self.line.append((self.cursor_x, word, font, color))
