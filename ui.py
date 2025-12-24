@@ -1,5 +1,5 @@
 import tkinter
-from browser import URL, HTMLParser
+from browser import URL, HTMLParser, CSSParser, style, cascade_priority
 import tkinter.font
 from browser import Text, Element
 
@@ -9,6 +9,7 @@ HEIGHT = 600
 HSTEP = 13
 VSTEP = 18
 SCROLL_STEP = 35
+DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
 def tree_to_list(tree, list):
     list.append(tree)
@@ -96,6 +97,14 @@ class Chrome:
     
     def paint(self):
         cmds = []
+        
+        # Draw the URL bar background FIRST (only covers URL bar, not tabs)
+        cmds.append(DrawRect(
+            Rect(0, self.urlbar_top, WIDTH, self.bottom), "white"))
+        cmds.append(DrawLine(
+            0, self.bottom, WIDTH, self.bottom, "black", 1))
+        
+        # Now draw the new tab button
         cmds.append(DrawOutline(self.newtab_rect, "black", 1))
         cmds.append(DrawText(
             self.newtab_rect.left + self.padding,
@@ -104,6 +113,8 @@ class Chrome:
             self.font,
             "black"
         ))
+        
+        # Draw tabs
         for i, tab in enumerate(self.browser.tabs):
             bounds = self.tab_rect(i)
             cmds.append(DrawLine(
@@ -121,38 +132,38 @@ class Chrome:
                     0, bounds.bottom, bounds.left, bounds.bottom, "black", 1))
                 cmds.append(DrawLine(
                     bounds.right, bounds.bottom, WIDTH, bounds.bottom, "black", 1))
-            cmds.append(DrawRect(
-                Rect(0, 0, WIDTH, self.bottom), "white"))
-            cmds.append(DrawLine(
-                0, self.bottom, WIDTH, self.bottom, "black", 1))
-            cmds.append(DrawOutline(self.back_rect, "black", 1))
+
+        # Draw back button and address bar
+        cmds.append(DrawOutline(self.back_rect, "black", 1))
+        cmds.append(DrawText(
+            self.back_rect.left + self.padding,
+            self.back_rect.top,
+            "<", self.font, "black"))
+        
+        cmds.append(DrawOutline(self.address_rect, "black", 1))
+        
+        if self.focus == "address bar":
             cmds.append(DrawText(
-                self.back_rect.left + self.padding,
-                self.back_rect.top,
-                "<", self.font, "black"))
-            
-            if self.focus == "address bar":
-                cmds.append(DrawText(
-                    self.address_rect.left + self.padding,
-                    self.address_rect.top,
-                    self.address_bar ,
-                    self.font,
-                    "black"))
-                w = self.font.measure(self.address_bar)
-                cmds.append(DrawLine(
-                    self.address_rect.left + self.padding + w,
-                    self.address_rect.top,
-                    self.address_rect.left + self.padding + w,
-                    self.address_rect.bottom,
-                    "red", 1))
-            else:
-                url = str(self.browser.active_tab.url)
-                cmds.append(DrawText(
-                    self.address_rect.left + self.padding,
-                    self.address_rect.top,
-                    url,
-                    self.font,
-                    "black"))
+                self.address_rect.left + self.padding,
+                self.address_rect.top,
+                self.address_bar,
+                self.font,
+                "black"))
+            w = self.font.measure(self.address_bar)
+            cmds.append(DrawLine(
+                self.address_rect.left + self.padding + w,
+                self.address_rect.top,
+                self.address_rect.left + self.padding + w,
+                self.address_rect.bottom,
+                "red", 1))
+        else:
+            url = str(self.browser.active_tab.url)
+            cmds.append(DrawText(
+                self.address_rect.left + self.padding,
+                self.address_rect.top,
+                url,
+                self.font,
+                "black"))
 
         return cmds
     
@@ -192,7 +203,7 @@ class Browser:
         self.window = tkinter.Tk()
         self.width = WIDTH
         self.height = HEIGHT
-        self.canvas = tkinter.Canvas(self.window, width=WIDTH, height=HEIGHT)
+        self.canvas = tkinter.Canvas(self.window, width=WIDTH, height=HEIGHT, bg="white")
         self.canvas.pack(fill=tkinter.BOTH , expand=1)
         self.scroll = 0
         self.url = None
@@ -215,7 +226,7 @@ class Browser:
     def handle_key(self, e):
         if len(e.char) == 0: return
         if not (0x20 <= ord(e.char) < 0x7f): return
-        self.chrome.keypress(e.char)
+        self.chrome.key_press(e.char)
         self.draw()
 
     def handle_down(self, e):
@@ -262,12 +273,31 @@ class Tab:
     def __init__(self, tab_height):
         self.tab_height = tab_height
         self.history = []
+        self.scroll = 0
+        self.width = WIDTH
 
     def load(self, url):
         self.history.append(url)
         self.url = url
         body = url.request()
         self.nodes = HTMLParser(body).parse()
+        rules = DEFAULT_STYLE_SHEET.copy()
+        links = [node.attributes["href"]
+                 for node in tree_to_list(self.nodes, [])
+                 if isinstance(node, Element)
+                 and node.tag == "link"
+                 and node.attributes.get("rel") == "stylesheet"
+                 and "href" in node.attributes]
+        
+        for link in links:
+            style_url = url.resolve(link)
+            try:
+                body = style_url.request()
+            except:
+                continue
+            rules.extend(CSSParser(body).parse())
+
+        style(self.nodes, sorted(rules, key=cascade_priority))
         self.document = DocumentLayout(self.nodes)
         self.document.layout()
         self.display_list = []
@@ -285,9 +315,9 @@ class Tab:
             if cmd.rect.bottom < self.scroll: continue
             cmd.execute(self.scroll - offset, canvas)
         
-        self.draw_scrollbar()
+        self.draw_scrollbar(canvas)
 
-    def draw_scrollbar(self):
+    def draw_scrollbar(self, canvas):
         if not self.display_list:
             return
             
@@ -299,7 +329,7 @@ class Tab:
         scrollbar_height = (self.tab_height / content_height) * self.tab_height
         scrollbar_y = (self.scroll / content_height) * self.tab_height
         
-        self.canvas.create_rectangle(
+        canvas.create_rectangle(
             self.width - scrollbar_width, scrollbar_y,
             self.width, scrollbar_y + scrollbar_height,
             fill="blue", outline=""
@@ -367,6 +397,7 @@ class DrawText:
         self.font = font
         self.color = color
         self.bottom = y1 + font.metrics("linespace")
+        self.rect = Rect(x1, y1, x1 + font.measure(text), self.bottom)
 
     def execute(self, scroll, canvas):
         canvas.create_text(
@@ -378,17 +409,13 @@ class DrawText:
     
 class DrawRect:
     def __init__(self, rect, color):
-        # self.top = y1
-        # self.left = x1
-        # self.bottom = y2
-        # self.right = x2
         self.rect = rect
         self.color = color
 
     def execute(self, scroll, canvas):
         canvas.create_rectangle(
-            self.left, self.top - scroll,
-            self.right, self.bottom - scroll,
+            self.rect.left, self.rect.top - scroll,
+            self.rect.right, self.rect.bottom - scroll,
             width=0,
             fill=self.color)
 
@@ -407,7 +434,7 @@ class BlockLayout:
         self.size = 16
         self.color = "black"
         self.line = []
-        # self.display_list = []
+        self.display_list = []
 
     def self_rect(self):
         return Rect(self.x, self.y,
@@ -432,6 +459,8 @@ class BlockLayout:
             self.height = sum([child.height for child in self.children])
         else:
             self.new_line()
+            self.cursor_x = 0
+            self.cursor_y = 0
             self.recurse(self.node)
             for child in self.children:
                 child.layout()
@@ -490,21 +519,41 @@ class BlockLayout:
             for word in node.text.split():
                 self.word(node, word)
         else:
-            self.open_tag(node.tag)
+            if node.tag == "br":
+                self.flush()
             for child in node.children:
                 self.recurse(child)
-            self.close_tag(node.tag)
     
     def word(self, node, word):
-        font = get_font(self.weight, self.style, self.size)
+        color = node.parent.style["color"]
+        weight = node.parent.style["font-weight"]
+        style = node.parent.style["font-style"]
+        if style == "normal": style = "roman"
+        size = int(float(node.parent.style["font-size"][:-2]) * 0.75)
+        font = get_font(weight, style, size)
+        self.line.append((self.cursor_x, word, font, color))
         line = self.children[-1]
         previous_word = line.children[-1] if line.children else None
-        text = TextLayout(node, word, line, previous_word)#, font, self.color)
+        text = TextLayout(node, word, line, previous_word, font, self.color)
         line.children.append(text)
         w = font.measure(word)
         if self.cursor_x + w > self.width:
             self.new_line()
         self.cursor_x += w + font.measure(" ")
+
+    def flush(self):
+        if not self.line: return
+        metrics = [font.metrics() for x, word, font, color in self.line]
+        max_ascent = max([metric["ascent"] for metric in metrics])
+        baseline = self.cursor_y + 1.25 * max_ascent
+        for rel_x, word, font, color in self.line:
+            x = self.x + rel_x
+            y = self.y + baseline - font.metrics("ascent")
+            self.display_list.append((x, y, word, font, color))
+        max_descent = max([metric["descent"] for metric in metrics])
+        self.cursor_y = baseline + 1.25 * max_descent
+        self.cursor_x = 0
+        self.line = []
 
     def new_line(self):
         self.cursor_x = 0
@@ -516,7 +565,7 @@ class BlockLayout:
         cmds = []
         if isinstance(self.node, Element) and self.node.tag == "pre":
             x2, y2 = self.x + self.width, self.y + self.height
-            rect = DrawRect(self.x, self.y, x2, y2, "gray")
+            rect = DrawRect(self.self_rect(), "gray")
             cmds.append(rect)
 
         bgcolor = self.node.style.get("background-color", "transparent")
@@ -524,6 +573,10 @@ class BlockLayout:
         if bgcolor != "transparent":
             rect = DrawRect(self.self_rect(), bgcolor)
             cmds.append(rect)
+
+        if self.layout_mode() == "inline":
+            for x, y, word, font, color in self.display_list:
+                cmds.append(DrawText(x, y , word, font, color))
 
         return cmds
 
@@ -588,14 +641,14 @@ class LineLayout:
         return []
 
 class TextLayout:
-    def __init__(self, node, word, parent, previous,):# font, color):
+    def __init__(self, node, word, parent, previous, font, color):
         self.node = node
         self.word = word
         self.parent = parent
         self.previous = previous
         self.children = []
-        # self.font = font
-        # self.color = color
+        self.font = font
+        self.color = color
 
     def layout(self):
         # weight = self.node.style["font-weight"]
@@ -619,6 +672,8 @@ class TextLayout:
 
 if __name__ == '__main__':
     import sys
-    Browser().new_tab(URL(sys.argv[1]))
+    default_url = "file:///home/"
+    url = sys.argv[1] if len(sys.argv) > 1 else default_url
+    Browser().new_tab(URL(url))
     tkinter.mainloop()
 

@@ -2,6 +2,13 @@ import socket
 import ssl
 import os
 
+INHERITED_PROPERTIES = {
+    "font-size": "16px",
+    "font-style": "normal",
+    "font-weight": "normal",
+    "color": "black",
+}
+
 class URL:
     def __init__(self, url):
         try:
@@ -18,6 +25,12 @@ class URL:
             self.scheme, url = url.split('://', 1)
             if self.scheme not in ('http', 'https', 'file'):
                 raise ValueError(f"Unsupported scheme: {self.scheme}")
+
+            if self.scheme == 'file':
+                self.path = url
+                self.host = None
+                self.port = None
+                return
 
             if self.scheme == 'http':
                 self.port = 80
@@ -42,10 +55,14 @@ class URL:
 
     def request(self):
         if self.scheme == "file":
-            if os.path.isdir(self.path):
-                return "\n".join(os.listdir(self.path))
-            with open(self.path, "r", encoding="utf8") as f:
-                return f.read()
+            path = self.path
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf8") as f:
+                    return f.read()
+            elif os.path.isdir(path):
+                return self.generate_directory_listing(path)
+            else:
+                return f"<html><body><h1>Error</h1><p>Path not found: {path}</p></body></html>"
         
         if self.scheme == "data":
             return self.path.split(",", 1)[1]
@@ -91,8 +108,68 @@ class URL:
         s.close()
 
         return content
+
+    def generate_directory_listing(self, path):
+        path = os.path.abspath(path)
+        
+        html = f"<html><head><title>Directory: {path}</title></head><body>"
+        html += f"<h1>Index of {path}</h1>"
+        html += "<hr>"
+        html += "<ul>"
+        
+        # Add parent directory link (if not at root)
+        parent = os.path.dirname(path)
+        if parent and parent != path:
+            html += f'<li><a href="file://{parent}">..</a> (Parent Directory)</li>'
+        
+        try:
+            entries = sorted(os.listdir(path))
+            for entry in entries:
+                full_path = os.path.join(path, entry)
+                if os.path.isdir(full_path):
+                    html += f'<li><a href="file://{full_path}">{entry}/</a></li>'
+                else:
+                    html += f'<li><a href="file://{full_path}">{entry}</a></li>'
+        except PermissionError:
+            html += "<li>Permission denied</li>"
+        
+        html += "</ul>"
+        html += "<hr>"
+        html += "</body></html>"
+        
+        return html
+    
+    def resolve(self, url):
+        if "://" in url: return URL(url)
+        
+        if self.scheme == "file":
+            if url.startswith("/"):
+                return URL(f"file://{url}")
+            else:
+                if os.path.isfile(self.path):
+                    base_dir = os.path.dirname(self.path)
+                else:
+                    base_dir = self.path
+                new_path = os.path.normpath(os.path.join(base_dir, url))
+                return URL(f"file://{new_path}")
+        
+        if not url.startswith("/"):
+            dir, _ = self.path.rsplit("/", 1)
+            while url.startswith("../"):
+                _, url = url.split("/", 1)
+                if "/" in dir:
+                    dir, _ = dir.rsplit("/", 1)
+            url = dir + "/" + url
+        return URL(self.scheme + "://" + self.host + url)
     
     def __str__(self):
+        if self.scheme == "file":
+            return f"file://{self.path}"
+        if self.scheme == "data":
+            return f"data:{self.path}"
+        if self.scheme == "about":
+            return f"about:{self.path}"
+        
         port_part = ":" + str(self.port)
         if self.scheme == "https" and self.port == 443:
             port_part = ""
@@ -100,15 +177,41 @@ class URL:
             port_part = ""
         return self.scheme + "://" + self.host + port_part + self.path
     
-def style(node):
+# functions
+def style(node, rules):
     node.style = {}
+    for property, default_value in INHERITED_PROPERTIES.items():
+        if node.parent:
+            node.style[property] = node.parent.style[property]
+        else:
+            node.style[property] = default_value
+
+    for selector, body in rules:
+        if not selector.matches(node): continue
+        for property, value in body.items():
+            node.style[property] = value
+
     if isinstance(node, Element) and "style" in node.attributes:
         pairs = CSSParser(node.attributes["style"]).body()
         for property, value in pairs.items():
             node.style[property] = value
 
-        for child in node.children:
-            style(child)
+    if node.style["font-size"].endswith("%"):
+        if node.parent:
+            parent_font_size = node.parent.style["font-size"]
+        else:
+            parent_font_size = INHERITED_PROPERTIES["font-size"]
+        node_pct =float(node.style["font-size"][:-1]) / 100
+        parent_px = float(parent_font_size[:-2])
+        node.style["font-size"] = str(node_pct * parent_px) + "px"
+
+    for child in node.children:
+            style(child, rules)
+
+def cascade_priority(rule):
+    selector, body = rule
+    return selector.priority
+
     
 class CSSParser:
     def __init__(self, s):
@@ -168,6 +271,57 @@ class CSSParser:
             else:
                 self.i += 1
         return None
+    
+    def selector(self):
+        out = TagSelector(self.word().casefold())
+        self.whitespace()
+        while self.i < len(self.s) and self.s[self.i] != "{":
+            tag = self.word()
+            descendant = TagSelector(tag.casefold())
+            out = DescendantSelector(out, descendant)
+            self.whitespace()
+        return out
+    
+    def parse(self):
+        rules = []
+        while self.i < len(self.s):
+            try:
+                self.whitespace()
+                selector = self.selector()
+                self.literal("{")
+                self.whitespace()
+                body = self.body()
+                self.literal("}")
+                rules.append((selector, body))
+            except Exception:
+                why = self.ignore_until(["}"])
+                if why == "}":
+                    self.literal("}")
+                    self.whitespace()
+                else:
+                    break
+        return rules
+    
+class TagSelector:
+    def __init__(self, tag):
+        self.tag = tag
+        self.priority = 1
+
+    def matches(self, node):
+        return isinstance(node, Element) and self.tag == node.tag
+    
+class DescendantSelector:
+    def __init__(self, ancestor, descendant):
+        self.ancestor = ancestor
+        self.descendant = descendant
+        self.priority = ancestor.priority + descendant.priority
+
+    def matches(self, node):
+        if not self.descendant.matches(node): return False
+        while node.parent:
+            if self.ancestor.matches(node.parent): return True
+            node = node.parent
+        return False
     
 class HTMLParser:
     SELF_CLOSING_TAGS = [
