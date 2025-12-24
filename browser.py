@@ -100,6 +100,16 @@ class URL:
             port_part = ""
         return self.scheme + "://" + self.host + port_part + self.path
     
+def style(node):
+    node.style = {}
+    if isinstance(node, Element) and "style" in node.attributes:
+        pairs = CSSParser(node.attributes["style"]).body()
+        for property, value in pairs.items():
+            node.style[property] = value
+
+        for child in node.children:
+            style(child)
+    
 class CSSParser:
     def __init__(self, s):
         self.s = s
@@ -158,13 +168,6 @@ class CSSParser:
             else:
                 self.i += 1
         return None
-    
-def style(node):
-    node.style = {}
-    if isinstance(node, Element) and "style" in node.attributes:
-        pairs = CSSParser(node.attributes["style"]).body()
-        for property, value in pairs.items():
-            node.style[property] = value
     
 class HTMLParser:
     SELF_CLOSING_TAGS = [
