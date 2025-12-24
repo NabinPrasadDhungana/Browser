@@ -298,7 +298,7 @@ class Tab:
             rules.extend(CSSParser(body).parse())
 
         style(self.nodes, sorted(rules, key=cascade_priority))
-        self.document = DocumentLayout(self.nodes)
+        self.document = DocumentLayout(self.nodes, self.width)
         self.document.layout()
         self.display_list = []
         paint_tree(self.document, self.display_list)
@@ -358,7 +358,7 @@ class Tab:
         self.width = width
         self.tab_height = height
         if hasattr(self, 'nodes'):
-            self.document = DocumentLayout(self.nodes)
+            self.document = DocumentLayout(self.nodes, self.width)
             self.document.layout()
             self.display_list = []
             paint_tree(self.document, self.display_list)
@@ -531,14 +531,15 @@ class BlockLayout:
         if style == "normal": style = "roman"
         size = int(float(node.parent.style["font-size"][:-2]) * 0.75)
         font = get_font(weight, style, size)
+        w = font.measure(word)
+        # Check if word fits, if not, wrap to new line first
+        if self.cursor_x + w > self.width:
+            self.new_line()
         self.line.append((self.cursor_x, word, font, color))
         line = self.children[-1]
         previous_word = line.children[-1] if line.children else None
         text = TextLayout(node, word, line, previous_word, font, self.color)
         line.children.append(text)
-        w = font.measure(word)
-        if self.cursor_x + w > self.width:
-            self.new_line()
         self.cursor_x += w + font.measure(" ")
 
     def flush(self):
@@ -587,16 +588,17 @@ def paint_tree(layout_object, display_list):
             paint_tree(child, display_list)
 
 class DocumentLayout:
-    def __init__(self, node):
+    def __init__(self, node, width=WIDTH):
         self.node = node
         self.parent = None
         self.children = []
+        self._width = width
         
 
     def layout(self):
         self.x = HSTEP
         self.y = VSTEP
-        self.width = WIDTH - 2*HSTEP
+        self.width = self._width - 2*HSTEP
         child = BlockLayout(self.node, self, None)
         self.children.append(child)
         child.layout()
