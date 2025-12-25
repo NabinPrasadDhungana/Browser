@@ -315,9 +315,9 @@ class Tab:
             if cmd.rect.bottom < self.scroll: continue
             cmd.execute(self.scroll - offset, canvas)
         
-        self.draw_scrollbar(canvas)
+        self.draw_scrollbar(canvas, offset)
 
-    def draw_scrollbar(self, canvas):
+    def draw_scrollbar(self, canvas, offset):
         if not self.display_list:
             return
             
@@ -327,7 +327,7 @@ class Tab:
             
         scrollbar_width = 12
         scrollbar_height = (self.tab_height / content_height) * self.tab_height
-        scrollbar_y = (self.scroll / content_height) * self.tab_height
+        scrollbar_y = (self.scroll / content_height) * self.tab_height + offset
         
         canvas.create_rectangle(
             self.width - scrollbar_width, scrollbar_y,
