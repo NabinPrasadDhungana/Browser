@@ -53,7 +53,8 @@ class URL:
             self.scheme = "about"
             self.path = "blank"
 
-    def request(self):
+    def request(self, payload=None):
+        method = "POST" if payload else "GET"
         if self.scheme == "file":
             path = self.path
             if os.path.isfile(path):
@@ -78,11 +79,16 @@ class URL:
             ctx = ssl.create_default_context()
             s = ctx.wrap_socket(s, server_hostname=self.host)
         
-        request = f"GET {self.path} HTTP/1.0\r\n"
+        request = f"{method} {self.path} HTTP/1.0\r\n"
         request += f"HOST: {self.host}\r\n"
+        if payload:
+            length = len(payload.encode("utf8"))
+            request += f"Content-Length: {length}\r\n"
         request += "Connection: close\r\n"
         request += "User-Agent: Nabin\r\n"
         request += "\r\n"
+        if payload:
+            request += payload
         s.send(request.encode("utf8"))
 
         response = s.makefile("r", encoding="utf8", newline="\r\n")
@@ -160,7 +166,14 @@ class URL:
                 if "/" in dir:
                     dir, _ = dir.rsplit("/", 1)
             url = dir + "/" + url
-        return URL(self.scheme + "://" + self.host + url)
+        
+        # Include port in resolved URL
+        port_part = ""
+        if self.scheme == "https" and self.port != 443:
+            port_part = ":" + str(self.port)
+        elif self.scheme == "http" and self.port != 80:
+            port_part = ":" + str(self.port)
+        return URL(self.scheme + "://" + self.host + port_part + url)
     
     def __str__(self):
         if self.scheme == "file":
@@ -248,7 +261,7 @@ class CSSParser:
     
     def body(self):
         pairs = {}
-        while self.i < len(self.s):
+        while self.i < len(self.s) and self.s[self.i] != "}":
             try:
                 prop, val = self.pair()
                 pairs[prop] = val
@@ -256,7 +269,7 @@ class CSSParser:
                 self.literal(";")
                 self.whitespace()
             except Exception:
-                why = self.ignore_until([";"])
+                why = self.ignore_until([";", "}"])
                 if why == ";":
                     self.literal(";")
                     self.whitespace()
@@ -437,6 +450,7 @@ class Text:
         self.text = text
         self.children = []
         self.parent = parent
+        self.is_focused = False
 
     def __repr__(self):
         return repr(self.text)
@@ -447,6 +461,7 @@ class Element:
         self.attributes = attributes
         self.children = []
         self.parent = parent
+        self.is_focused = False
 
     def __repr__(self):
         return "<" + self.tag + ">"
