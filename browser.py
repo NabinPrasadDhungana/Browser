@@ -11,6 +11,7 @@ INHERITED_PROPERTIES = {
 
 class URL:
     def __init__(self, url):
+        self.fragment = None
         try:
             if url == "about:blank":
                 self.scheme = "about"
@@ -19,8 +20,13 @@ class URL:
 
             if url.startswith("data:"):
                 self.scheme, url = url.split(":", 1)
+                if "#" in url:
+                    url, self.fragment = url.rsplit("#", 1)
                 self.path = url
                 return
+
+            if "#" in url:
+                url, self.fragment = url.rsplit("#", 1)
 
             self.scheme, url = url.split('://', 1)
             if self.scheme not in ('http', 'https', 'file'):
@@ -146,6 +152,12 @@ class URL:
         return html
     
     def resolve(self, url):
+        # Handle fragment-only URLs
+        if url.startswith("#"):
+            new_url = URL(str(self))
+            new_url.fragment = url[1:]
+            return new_url
+        
         if "://" in url: return URL(url)
         
         if self.scheme == "file":
@@ -176,19 +188,20 @@ class URL:
         return URL(self.scheme + "://" + self.host + port_part + url)
     
     def __str__(self):
+        fragment_part = "#" + self.fragment if self.fragment else ""
         if self.scheme == "file":
-            return f"file://{self.path}"
+            return f"file://{self.path}{fragment_part}"
         if self.scheme == "data":
-            return f"data:{self.path}"
+            return f"data:{self.path}{fragment_part}"
         if self.scheme == "about":
-            return f"about:{self.path}"
+            return f"about:{self.path}{fragment_part}"
         
         port_part = ":" + str(self.port)
         if self.scheme == "https" and self.port == 443:
             port_part = ""
         if self.scheme == "http" and self.port == 80:
             port_part = ""
-        return self.scheme + "://" + self.host + port_part + self.path
+        return self.scheme + "://" + self.host + port_part + self.path + fragment_part
     
 # functions
 def style(node, rules):

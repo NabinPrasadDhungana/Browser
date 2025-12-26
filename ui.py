@@ -19,6 +19,27 @@ def tree_to_list(tree, list):
         tree_to_list(child, list)
     return list
 
+def parse_font_size(font_size_str):
+    """Parse font-size string and return size in pixels."""
+    import re
+    match = re.match(r'^([\d.]+)(px|rem|em|pt)?$', font_size_str)
+    if match:
+        value = float(match.group(1))
+        unit = match.group(2) or 'px'
+        if unit == 'px':
+            return int(value * 0.75)
+        elif unit == 'rem' or unit == 'em':
+            return int(value * 16 * 0.75)  # 1rem = 16px default
+        elif unit == 'pt':
+            return int(value)  # pt is roughly equivalent to pixels for fonts
+    return 12  # fallback default size
+
+def parse_font_weight(weight_str):
+    """Convert CSS font-weight to tkinter weight (normal or bold)."""
+    if weight_str in ("bold", "bolder", "900", "800", "700", "600"):
+        return "bold"
+    return "normal"
+
 class Rect:
     def __init__(self, left, top, right, bottom):
         self.left = left
@@ -55,32 +76,77 @@ class Chrome:
             self.padding + back_width,
             self.urlbar_bottom - self.padding)
 
+        forward_width = self.font.measure(">") + 2*self.padding
+        self.forward_rect = Rect(
+            self.back_rect.right + self.padding,
+            self.urlbar_top + self.padding,
+            self.back_rect.right + self.padding + forward_width,
+            self.urlbar_bottom - self.padding)
+
         self.address_rect = Rect(
-            self.back_rect.top + self.padding,
+            self.forward_rect.right + self.padding,
             self.urlbar_top + self.padding,
             WIDTH - self.padding,
             self.urlbar_bottom - self.padding)
         self.focus = None
         self.address_bar = ""
+        self.cursor = 0
 
     def blur(self):
         self.focus = None
 
     def key_press(self, char):
         if self.focus == "address bar":
-            self.address_bar += char
+            self.address_bar = self.address_bar[:self.cursor] + char + self.address_bar[self.cursor:]
+            self.cursor += 1
             return True
         return False
 
     def backspace(self):
-        if self.focus == "address bar" and self.address_bar:
-            self.address_bar = self.address_bar[:-1]
+        if self.focus == "address bar" and self.cursor > 0:
+            self.address_bar = self.address_bar[:self.cursor-1] + self.address_bar[self.cursor:]
+            self.cursor -= 1
+            return True
+        return False
+
+    def arrow_left(self):
+        if self.focus == "address bar" and self.cursor > 0:
+            self.cursor -= 1
+            return True
+        return False
+
+    def arrow_right(self):
+        if self.focus == "address bar" and self.cursor < len(self.address_bar):
+            self.cursor += 1
+            return True
+        return False
+
+    def is_url(self, text):
+        """Check if text looks like a URL."""
+        # Has a scheme like http:// or https://
+        if text.startswith("http://") or text.startswith("https://"):
+            return True
+        # Has a scheme like file:// or data:
+        if "://" in text or text.startswith("data:"):
+            return True
+        # Looks like a domain (contains a dot and no spaces)
+        if "." in text and " " not in text:
             return True
         return False
 
     def enter(self):
         if self.focus == "address bar":
-            self.browser.active_tab.load(URL(self.address_bar))
+            text = self.address_bar.strip()
+            if self.is_url(text):
+                # Add https:// if no scheme present
+                if not ("://" in text or text.startswith("data:")):
+                    text = "https://" + text
+                self.browser.active_tab.load(URL(text))
+            else:
+                # Search with Google
+                query = urllib.parse.quote_plus(text)
+                search_url = "https://google.com/search?q=" + query
+                self.browser.active_tab.load(URL(search_url))
             self.focus = None
 
     def tab_rect(self, i):
@@ -99,9 +165,12 @@ class Chrome:
             self.browser.new_tab(URL("https://browser.engineering/"))
         elif self.back_rect.contains_point(x, y):
             self.browser.active_tab.go_back()
+        elif self.forward_rect.contains_point(x, y):
+            self.browser.active_tab.go_forward()
         elif self.address_rect.contains_point(x, y):
             self.focus = "address bar"
             self.address_bar = ""
+            self.cursor = 0
         else:
             for i, tab in enumerate(self.browser.tabs):
                 if self.tab_rect(i).contains_point(x, y):
@@ -146,12 +215,21 @@ class Chrome:
                 cmds.append(DrawLine(
                     bounds.right, bounds.bottom, WIDTH, bounds.bottom, "black", 1))
 
-        # Draw back button and address bar
-        cmds.append(DrawOutline(self.back_rect, "black", 1))
+        # Draw back button (gray if can't go back)
+        back_color = "black" if len(self.browser.active_tab.history) > 1 else "gray"
+        cmds.append(DrawOutline(self.back_rect, back_color, 1))
         cmds.append(DrawText(
             self.back_rect.left + self.padding,
             self.back_rect.top,
-            "<", self.font, "black"))
+            "<", self.font, back_color))
+        
+        # Draw forward button (gray if can't go forward)
+        forward_color = "black" if len(self.browser.active_tab.forward_history) > 0 else "gray"
+        cmds.append(DrawOutline(self.forward_rect, forward_color, 1))
+        cmds.append(DrawText(
+            self.forward_rect.left + self.padding,
+            self.forward_rect.top,
+            ">", self.font, forward_color))
         
         cmds.append(DrawOutline(self.address_rect, "black", 1))
         
@@ -162,7 +240,7 @@ class Chrome:
                 self.address_bar,
                 self.font,
                 "black"))
-            w = self.font.measure(self.address_bar)
+            w = self.font.measure(self.address_bar[:self.cursor])
             cmds.append(DrawLine(
                 self.address_rect.left + self.padding + w,
                 self.address_rect.top,
@@ -230,6 +308,8 @@ class Browser:
         self.window.bind("<Key>", self.handle_key)
         self.window.bind("<Return>", self.handle_enter)
         self.window.bind("<BackSpace>", self.handle_backspace)
+        self.window.bind("<Left>", self.handle_left)
+        self.window.bind("<Right>", self.handle_right)
 
         self.chrome = Chrome(self)
 
@@ -239,6 +319,14 @@ class Browser:
 
     def handle_backspace(self, e):
         if self.chrome.backspace():
+            self.draw()
+
+    def handle_left(self, e):
+        if self.chrome.arrow_left():
+            self.draw()
+
+    def handle_right(self, e):
+        if self.chrome.arrow_right():
             self.draw()
 
     def handle_key(self, e):
@@ -285,6 +373,13 @@ class Browser:
         self.active_tab.draw(self.canvas, self.chrome.bottom)
         for cmd in self.chrome.paint():
             cmd.execute(0, self.canvas)
+        
+        # Set window title from page's <title> element
+        title = self.active_tab.get_title()
+        if title:
+            self.window.title(title)
+        else:
+            self.window.title(str(self.active_tab.url))
 
     def new_tab(self, url):
         new_tab = Tab(HEIGHT - self.chrome.bottom)
@@ -297,11 +392,14 @@ class Tab:
     def __init__(self, tab_height):
         self.tab_height = tab_height
         self.history = []
+        self.forward_history = []
         self.scroll = 0
         self.width = WIDTH
         self.focus = None
 
-    def load(self, url, payload=None):
+    def load(self, url, payload=None, from_navigation=False):
+        if not from_navigation:
+            self.forward_history.clear()
         self.history.append(url)
         self.url = url
         body = url.request(payload)
@@ -324,6 +422,20 @@ class Tab:
         
         self.rules = rules
         self.render()
+        self.scroll_to_fragment()
+
+    def scroll_to_fragment(self):
+        if not self.url.fragment:
+            return
+        
+        for node in tree_to_list(self.nodes, []):
+            if isinstance(node, Element) and node.attributes.get("id") == self.url.fragment:
+                # Find the layout object for this node
+                for obj in tree_to_list(self.document, []):
+                    if hasattr(obj, 'node') and obj.node == node:
+                        self.scroll = obj.y
+                        return
+                break
 
     def render(self):
         style(self.nodes, sorted(self.rules, key=cascade_priority))
@@ -332,11 +444,24 @@ class Tab:
         self.display_list = []
         paint_tree(self.document, self.display_list)
 
+    def get_title(self):
+        for node in tree_to_list(self.nodes, []):
+            if isinstance(node, Element) and node.tag == "title":
+                if node.children and isinstance(node.children[0], Text):
+                    return node.children[0].text
+        return None
+
     def go_back(self):
         if len(self.history) > 1:
-            self.history.pop()
+            current = self.history.pop()
+            self.forward_history.append(current)
             back = self.history.pop()
-            self.load(back)
+            self.load(back, from_navigation=True)
+
+    def go_forward(self):
+        if len(self.forward_history) > 0:
+            forward = self.forward_history.pop()
+            self.load(forward, from_navigation=True)
 
     def draw(self, canvas, offset):
         for cmd in self.display_list:
@@ -405,7 +530,12 @@ class Tab:
             if isinstance(elt, Text):
                 pass
             elif elt.tag == "a" and "href" in elt.attributes:
-                url = self.url.resolve(elt.attributes["href"])
+                href = elt.attributes["href"]
+                if href.startswith("#"):
+                    self.url.fragment = href[1:]
+                    self.scroll_to_fragment()
+                    return
+                url = self.url.resolve(href)
                 return self.load(url)
             elif elt.tag == "input":
                 self.focus = elt
@@ -592,10 +722,10 @@ class BlockLayout:
     
     def word(self, node, word):
         color = node.style["color"]
-        weight = node.style["font-weight"]
+        weight = parse_font_weight(node.style["font-weight"])
         style = node.style["font-style"]
         if style == "normal": style = "roman"
-        size = int(float(node.style["font-size"][:-2]) * 0.75)
+        size = parse_font_size(node.style["font-size"])
         font = get_font(weight, style, size)
         w = font.measure(word)
         if self.cursor_x + w > self.width:
@@ -614,10 +744,10 @@ class BlockLayout:
         line = self.children[-1]
         previous_word = line.children[-1] if line.children else None
 
-        weight = node.style["font-weight"]
+        weight = parse_font_weight(node.style["font-weight"])
         style = node.style["font-style"]
         if style == "normal": style = "roman"
-        size = int(float(node.style["font-size"][:-2]) * .75)
+        size = parse_font_size(node.style["font-size"])
         font = get_font(size=size, weight=weight, slant=style)
 
         input = InputLayout(node, line, previous_word, font)
