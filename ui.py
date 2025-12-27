@@ -52,6 +52,7 @@ class Rect:
 
 class Chrome:
     def __init__(self, browser):
+        self.width = WIDTH
         self.browser = browser
         self.font = get_font("normal", "roman", 20)
         self.font_height = self.font.metrics("linespace")
@@ -92,6 +93,10 @@ class Chrome:
         self.address_bar = ""
         self.cursor = 0
 
+    def resize(self, width):
+        self.address_rect.right = width - self.padding
+        self.width = width
+
     def blur(self):
         self.focus = None
 
@@ -122,14 +127,10 @@ class Chrome:
         return False
 
     def is_url(self, text):
-        """Check if text looks like a URL."""
-        # Has a scheme like http:// or https://
         if text.startswith("http://") or text.startswith("https://"):
             return True
-        # Has a scheme like file:// or data:
         if "://" in text or text.startswith("data:"):
             return True
-        # Looks like a domain (contains a dot and no spaces)
         if "." in text and " " not in text:
             return True
         return False
@@ -138,12 +139,10 @@ class Chrome:
         if self.focus == "address bar":
             text = self.address_bar.strip()
             if self.is_url(text):
-                # Add https:// if no scheme present
                 if not ("://" in text or text.startswith("data:")):
                     text = "https://" + text
                 self.browser.active_tab.load(URL(text))
             else:
-                # Search with Google
                 query = urllib.parse.quote_plus(text)
                 search_url = "https://google.com/search?q=" + query
                 self.browser.active_tab.load(URL(search_url))
@@ -184,7 +183,7 @@ class Chrome:
         cmds.append(DrawRect(
             Rect(0, self.urlbar_top, WIDTH, self.bottom), "white"))
         cmds.append(DrawLine(
-            0, self.bottom, WIDTH, self.bottom, "black", 1))
+            0, self.bottom, self.width, self.bottom, "black", 1))
         
         # Now draw the new tab button
         cmds.append(DrawOutline(self.newtab_rect, "black", 1))
@@ -213,7 +212,7 @@ class Chrome:
                 cmds.append(DrawLine(
                     0, bounds.bottom, bounds.left, bounds.bottom, "black", 1))
                 cmds.append(DrawLine(
-                    bounds.right, bounds.bottom, WIDTH, bounds.bottom, "black", 1))
+                    bounds.right, bounds.bottom, self.width, bounds.bottom, "black", 1))
 
         # Draw back button (gray if can't go back)
         back_color = "black" if len(self.browser.active_tab.history) > 1 else "gray"
@@ -364,6 +363,7 @@ class Browser:
     def handle_configure(self, e):
         self.width = e.width
         self.height = e.height
+        self.chrome.resize(e.width)
         if self.active_tab:
             self.active_tab.resize(e.width, e.height - self.chrome.bottom)
         self.draw()
