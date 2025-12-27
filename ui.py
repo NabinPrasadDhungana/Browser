@@ -862,6 +862,20 @@ class LineLayout:
 
         self.height = 1.25 * (max_ascent + max_descent)
 
+        max_word = self.children[-1]
+        line_width = max_word.x + max_word.width - self.x
+        
+        align = self.node.style.get("text-align", "left")
+        if align == "center":
+            offset = (self.width - line_width) / 2
+        elif align == "right":
+            offset = self.width - line_width
+        else:
+            offset = 0
+            
+        for word in self.children:
+            word.x += offset
+
     def paint(self):
         return []
 
