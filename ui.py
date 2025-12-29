@@ -1,4 +1,5 @@
 import tkinter
+import dukpy
 from browser import URL, HTMLParser, CSSParser, style, cascade_priority
 import tkinter.font
 from browser import Text, Element
@@ -12,6 +13,8 @@ VSTEP = 18
 SCROLL_STEP = 35
 INPUT_WIDTH_PX = 200
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
+RUNTIME_JS = open("runtime.js").read()
+EVENT_DISPATCH_JS = "new Node(dukpy.handle).dispatchEvent(dukpy.type)"
 
 def tree_to_list(tree, list):
     list.append(tree)
@@ -39,6 +42,60 @@ def parse_font_weight(weight_str):
     if weight_str in ("bold", "bolder", "900", "800", "700", "600"):
         return "bold"
     return "normal"
+
+class JSContext:
+    def __init__(self, tab):
+        self.tab = tab
+        self.interp = dukpy.JSInterpreter()
+        self.node_to_handle = {}
+        self.handle_to_node = {}
+        self.interp.export_function("log", print)
+        self.interp.export_function("querySelectorAll", self.querySelectorAll)
+        self.interp.export_function("getAttribute", self.getAttribute)
+        self.interp.export_function("innerHTML_set", self.innerHTML_set)
+        self.interp.evaljs(RUNTIME_JS)
+
+    def run(self,script, code):
+        try:
+            return self.interp.evaljs(code)
+        except dukpy.JSRuntimeError as e:
+            print("Script", script, "crashed", e)
+
+    def querySelectorAll(self, selector_text):
+        selector = CSSParser(selector_text).selector()
+        nodes = [node for node
+                in tree_to_list(self.tab.nodes, [])
+                if selector.matches(node)]
+        return [self.get_handle(node) for node in nodes]
+    
+    def get_handle(self, elt):
+        if elt not in self.node_to_handle:
+            handle = len(self.node_to_handle)
+            self.node_to_handle[elt] = handle
+            self.handle_to_node[handle] = elt
+        else:
+            handle = self.node_to_handle[elt]
+        return handle
+    
+    def getAttribute(self, handle, attr):
+        elt = self.handle_to_node[handle]
+        attr_value = elt.attributes.get(attr, None)
+        return attr_value if attr_value is not None else None
+    
+    def dispatch_event(self, type, elt):
+        handle = self.node_to_handle.get(elt, -1)
+
+        do_default = self.interp.evaljs(EVENT_DISPATCH_JS, type=type, handle=handle)
+        return do_default
+
+    def innerHTML_set(self, handle, s):
+        doc = HTMLParser("<html><body>" + s + "</body></html>").parse()
+        new_nodes = doc.children[0].children
+        elt = self.handle_to_node[handle]
+        elt.children = new_nodes
+        for child in elt.children:
+            child.parent = elt
+        self.tab.render()
 
 class Rect:
     def __init__(self, left, top, right, bottom):
@@ -405,20 +462,43 @@ class Tab:
         body = url.request(payload)
         self.nodes = HTMLParser(body).parse()
         rules = DEFAULT_STYLE_SHEET.copy()
-        links = [node.attributes["href"]
-                 for node in tree_to_list(self.nodes, [])
-                 if isinstance(node, Element)
-                 and node.tag == "link"
-                 and node.attributes.get("rel") == "stylesheet"
-                 and "href" in node.attributes]
+
+        for node in tree_to_list(self.nodes, []):
+            if isinstance(node, Element):
+                # Handle external CSS files linked via <link>
+                if node.tag == "link" and \
+                   node.attributes.get("rel") == "stylesheet" and \
+                   "href" in node.attributes:
+                    try:
+                        style_url = url.resolve(node.attributes["href"])
+                        body = style_url.request()
+                        rules.extend(CSSParser(body).parse())
+                    except:
+                        continue
+                
+                # Handle internal CSS blocks inside <style>
+                elif node.tag == "style":
+                    style_content = ""
+                    for child in node.children:
+                        if isinstance(child, Text):
+                            style_content += child.text
+                    if style_content:
+                        rules.extend(CSSParser(style_content).parse())
+
+        scripts = [node.attributes["src"] for node
+                   in tree_to_list(self.nodes, [])
+                   if isinstance(node, Element)
+                   and node.tag == "script"
+                   and "src" in node.attributes]
         
-        for link in links:
-            style_url = url.resolve(link)
+        self.js = JSContext(self)
+        for script in scripts:
+            script_url = url.resolve(script)
             try:
-                body = style_url.request()
+                body = script_url.request()
             except:
                 continue
-            rules.extend(CSSParser(body).parse())
+            self.js.run(script_url, body)
         
         self.rules = rules
         self.render()
@@ -530,6 +610,7 @@ class Tab:
             if isinstance(elt, Text):
                 pass
             elif elt.tag == "a" and "href" in elt.attributes:
+                self.js.dispatch_event("click", elt)
                 href = elt.attributes["href"]
                 if href.startswith("#"):
                     self.url.fragment = href[1:]
@@ -538,24 +619,28 @@ class Tab:
                 url = self.url.resolve(href)
                 return self.load(url)
             elif elt.tag == "input":
+                self.js.dispatch_event("click", elt)
                 self.focus = elt
                 elt.attributes["value"] = ""
                 elt.is_focused = True
                 return self.render()
             elif elt.tag == "button":
+                self.js.dispatch_event("click", elt)
                 while elt:
                     if elt.tag == "form" and "action" in elt.attributes:
                         return self.submit_form(elt)
                     elt = elt.parent
-            elt = elt.parent
+            elt = elt.parent if elt.parent else None
         self.render()
 
     def key_press(self, char):
         if self.focus:
+            if self.js.dispatch_event("keydown", self.focus): return
             self.focus.attributes["value"] += char
             self.render()
 
     def submit_form(self, elt):
+        if self.js.dispatch_event("submit", elt): return
         inputs = [node for node in tree_to_list(elt, [])
                   if isinstance(node, Element)
                   and node.tag == "input"
