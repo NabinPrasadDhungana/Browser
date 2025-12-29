@@ -1,6 +1,7 @@
 import socket
 import ssl
 import os
+import html
 
 INHERITED_PROPERTIES = {
     "font-size": "16px",
@@ -105,17 +106,10 @@ class URL:
 
         print(f"version: {version}, status: {status} and explanation: {explanation}")
 
-        response_headers = {}
-
         while True:
             line = response.readline()
             if line == "\r\n":
                 break
-            header, value = line.split(":", 1)
-            response_headers[header.casefold()] = value.strip()
-
-        assert "transfer-encoding" not in response_headers
-        assert "content-encoding" not in response_headers
 
         content = response.read()
         s.close()
@@ -385,7 +379,7 @@ class HTMLParser:
     
     def add_text(self, text):
         if text.isspace(): return
-
+        text = html.unescape(text)
         self.implicit_tags(None)
         parent = self.unfinished[-1]
         node = Text(text, parent)
@@ -455,10 +449,6 @@ def print_tree(node, indent=0):
     for child in node.children:
         print_tree(child, indent + 2)
 
-def load(url):
-    body = url.request()
-    HTMLParser(body)
-
 class Text:
     def __init__(self, text, parent):
         self.text = text
@@ -479,10 +469,3 @@ class Element:
 
     def __repr__(self):
         return "<" + self.tag + ">"
-
-if __name__ == "__main__":
-    import sys
-    # load(URL(sys.argv[1]))
-    body = URL(sys.argv[1]).request()
-    nodes = HTMLParser(body).parse()
-    print_tree(nodes)

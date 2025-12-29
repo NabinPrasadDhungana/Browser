@@ -43,16 +43,19 @@ var allow_submit = true;
 function lengthCheck() {
     var name = this.getAttribute("name");
     var value = this.getAttribute("value");
-    allow_submit = value.length <= 100;
+    allow_submit = value && value.length <= 100;
     if (!allow_submit) {
         console.log("Input " + name + " has too much text.")
     }
 }
 
-var form = document.querySelectorAll("form")[0];
-form.addEventListener("submit", function(e) {
-    if (!allow_submit) e.preventDefault();
-});
+var forms = document.querySelectorAll("form");
+if (forms.length > 0) {
+    var form = forms[0];
+    form.addEventListener("submit", function(e) {
+        if (!allow_submit) e.preventDefault();
+    });
+}
 
 var inputs = document.querySelectorAll("input");
 for (var i = 0; i < inputs.length; i++) {

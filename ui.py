@@ -1032,7 +1032,7 @@ class InputLayout:
             if len(self.node.children) == 1 and isinstance(self.node.children[0], Text):
                 text = self.node.children[0].text
             else:
-                print("Ignoring contents inside button!")
+                # print("Ignoring contents inside button!")
                 text = ""
 
         if self.node.is_focused:
