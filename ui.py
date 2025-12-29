@@ -729,6 +729,8 @@ class BlockLayout:
         if mode == "block":
             previous = None
             for child in self.node.children:
+                if isinstance(child, Element) and child.tag in ["head", "script", "style", "title", "meta"]:
+                    continue
                 next = BlockLayout(child, self, previous)
                 self.children.append(next)
                 previous = next
@@ -797,6 +799,8 @@ class BlockLayout:
             for word in node.text.split():
                 self.word(node, word)
         else:
+            if node.tag in ["script", "style", "head", "title", "meta"]:
+                return
             if node.tag == "br":
                 self.new_line()
             elif node.tag == "input" or node.tag == "button":
