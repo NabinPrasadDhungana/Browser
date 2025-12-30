@@ -201,7 +201,7 @@ class Chrome:
                 self.browser.active_tab.load(URL(text))
             else:
                 query = urllib.parse.quote_plus(text)
-                search_url = "https://google.com/search?q=" + query
+                search_url = "https://www.google.com/search?q=" + query
                 self.browser.active_tab.load(URL(search_url))
             self.focus = None
 
@@ -218,7 +218,7 @@ class Chrome:
     def click(self, x, y):
         self.focus = None
         if self.newtab_rect.contains_point(x, y):
-            self.browser.new_tab(URL("https://browser.engineering/"))
+            self.browser.new_tab(URL("about:blank"))
         elif self.back_rect.contains_point(x, y):
             self.browser.active_tab.go_back()
         elif self.forward_rect.contains_point(x, y):

@@ -407,7 +407,7 @@ class HTMLParser:
 
     def get_attributes(self, text):
         parts = text.split()
-        tag = parts[0].casefold()
+        tag = parts[0].casefold() if parts else ""
         attributes = {}
         for attrpair in parts[1:]:
             if "=" in attrpair:
