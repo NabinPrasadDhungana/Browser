@@ -149,6 +149,8 @@ class Chrome:
         self.focus = None
         self.address_bar = ""
         self.cursor = 0
+        self.selection_start = None
+        self.selection_end = None
 
     def resize(self, width):
         self.address_rect.right = width - self.padding
@@ -159,29 +161,80 @@ class Chrome:
 
     def key_press(self, char):
         if self.focus == "address bar":
+            self.delete_selection()
             self.address_bar = self.address_bar[:self.cursor] + char + self.address_bar[self.cursor:]
             self.cursor += 1
             return True
         return False
 
     def backspace(self):
-        if self.focus == "address bar" and self.cursor > 0:
-            self.address_bar = self.address_bar[:self.cursor-1] + self.address_bar[self.cursor:]
-            self.cursor -= 1
+        if self.focus == "address bar":
+            if self.delete_selection():
+                return True
+            if self.cursor > 0:
+                self.address_bar = self.address_bar[:self.cursor-1] + self.address_bar[self.cursor:]
+                self.cursor -= 1
+                return True
+        return False
+
+    def arrow_left(self, e):
+        if self.focus == "address bar":
+            if self.cursor > 0:
+                self.cursor -= 1
+                if e.state & 0x0001: # Shift key
+                    if self.selection_start is None:
+                        self.selection_start = self.cursor + 1
+                    self.selection_end = self.cursor
+                else:
+                    self.selection_start = None
+                    self.selection_end = None
+                return True
+        return False
+
+    def arrow_right(self, e):
+        if self.focus == "address bar":
+            if self.cursor < len(self.address_bar):
+                self.cursor += 1
+                if e.state & 0x0001: # Shift key
+                    if self.selection_start is None:
+                        self.selection_start = self.cursor - 1
+                    self.selection_end = self.cursor
+                else:
+                    self.selection_start = None
+                    self.selection_end = None
+                return True
+        return False
+    
+    def delete_selection(self):
+        if self.selection_start is not None:
+            start = min(self.selection_start, self.selection_end)
+            end = max(self.selection_start, self.selection_end)
+            self.address_bar = self.address_bar[:start] + self.address_bar[end:]
+            self.cursor = start
+            self.selection_start = None
+            self.selection_end = None
             return True
         return False
 
-    def arrow_left(self):
-        if self.focus == "address bar" and self.cursor > 0:
-            self.cursor -= 1
-            return True
-        return False
+    def copy(self):
+        if self.selection_start is not None:
+            start = min(self.selection_start, self.selection_end)
+            end = max(self.selection_start, self.selection_end)
+            self.browser.window.clipboard_clear()
+            self.browser.window.clipboard_append(self.address_bar[start:end])
 
-    def arrow_right(self):
-        if self.focus == "address bar" and self.cursor < len(self.address_bar):
-            self.cursor += 1
-            return True
-        return False
+    def paste(self):
+        try:
+            text = self.browser.window.clipboard_get()
+        except:
+            return
+        self.delete_selection()
+        self.address_bar = self.address_bar[:self.cursor] + text + self.address_bar[self.cursor:]
+        self.cursor += len(text)
+
+    def cut(self):
+        self.copy()
+        self.delete_selection()
 
     def is_url(self, text):
         if text.startswith("http://") or text.startswith("https://"):
@@ -216,6 +269,7 @@ class Chrome:
         )
     
     def click(self, x, y):
+        was_focused = self.focus == "address bar"
         self.focus = None
         if self.newtab_rect.contains_point(x, y):
             self.browser.new_tab(URL("about:blank"))
@@ -225,8 +279,17 @@ class Chrome:
             self.browser.active_tab.go_forward()
         elif self.address_rect.contains_point(x, y):
             self.focus = "address bar"
-            self.address_bar = ""
-            self.cursor = 0
+            if not was_focused:
+                self.address_bar = str(self.browser.active_tab.url)
+            
+            self.cursor = len(self.address_bar)
+            for i in range(len(self.address_bar)):
+                w = self.font.measure(self.address_bar[:i+1])
+                if self.address_rect.left + self.padding + w > x:
+                    self.cursor = i
+                    break
+            self.selection_start = None
+            self.selection_end = None
         else:
             for i, tab in enumerate(self.browser.tabs):
                 if self.tab_rect(i).contains_point(x, y):
@@ -290,6 +353,13 @@ class Chrome:
         cmds.append(DrawOutline(self.address_rect, "black", 1))
         
         if self.focus == "address bar":
+            if self.selection_start is not None:
+                start = min(self.selection_start, self.selection_end)
+                end = max(self.selection_start, self.selection_end)
+                start_x = self.address_rect.left + self.padding + self.font.measure(self.address_bar[:start])
+                end_x = self.address_rect.left + self.padding + self.font.measure(self.address_bar[:end])
+                cmds.append(DrawRect(Rect(start_x, self.address_rect.top + self.padding, end_x, self.address_rect.bottom - self.padding), "lightblue"))
+
             cmds.append(DrawText(
                 self.address_rect.left + self.padding,
                 self.address_rect.top,
@@ -366,24 +436,59 @@ class Browser:
         self.window.bind("<BackSpace>", self.handle_backspace)
         self.window.bind("<Left>", self.handle_left)
         self.window.bind("<Right>", self.handle_right)
+        self.window.bind("<Control-c>", self.handle_copy)
+        self.window.bind("<Control-v>", self.handle_paste)
+        self.window.bind("<Control-x>", self.handle_cut)
 
         self.chrome = Chrome(self)
 
     def handle_enter(self, e):
-        self.chrome.enter()
+        if self.chrome.focus == "address bar":
+            self.chrome.enter()
+        elif self.focus == "content":
+            self.active_tab.enter()
         self.draw()
 
     def handle_backspace(self, e):
-        if self.chrome.backspace():
-            self.draw()
+        if self.chrome.focus == "address bar":
+            self.chrome.backspace()
+        elif self.focus == "content":
+            self.active_tab.backspace()
+        self.draw()
 
     def handle_left(self, e):
-        if self.chrome.arrow_left():
-            self.draw()
+        if self.chrome.focus == "address bar":
+            self.chrome.arrow_left(e)
+        elif self.focus == "content":
+            self.active_tab.arrow_left(e)
+        self.draw()
 
     def handle_right(self, e):
-        if self.chrome.arrow_right():
-            self.draw()
+        if self.chrome.focus == "address bar":
+            self.chrome.arrow_right(e)
+        elif self.focus == "content":
+            self.active_tab.arrow_right(e)
+        self.draw()
+
+    def handle_copy(self, e):
+        if self.chrome.focus == "address bar":
+            self.chrome.copy()
+        elif self.focus == "content":
+            self.active_tab.copy()
+
+    def handle_paste(self, e):
+        if self.chrome.focus == "address bar":
+            self.chrome.paste()
+        elif self.focus == "content":
+            self.active_tab.paste()
+        self.draw()
+
+    def handle_cut(self, e):
+        if self.chrome.focus == "address bar":
+            self.chrome.cut()
+        elif self.focus == "content":
+            self.active_tab.cut()
+        self.draw()
 
     def handle_key(self, e):
         if len(e.char) == 0: return
@@ -621,8 +726,11 @@ class Tab:
             elif elt.tag == "input":
                 self.js.dispatch_event("click", elt)
                 self.focus = elt
-                elt.attributes["value"] = ""
                 elt.is_focused = True
+                if not hasattr(elt, "cursor"):
+                    elt.cursor = len(elt.attributes.get("value", ""))
+                elt.selection_start = None
+                elt.selection_end = None
                 return self.render()
             elif elt.tag == "button":
                 self.js.dispatch_event("click", elt)
@@ -636,7 +744,106 @@ class Tab:
     def key_press(self, char):
         if self.focus:
             if self.js.dispatch_event("keydown", self.focus): return
-            self.focus.attributes["value"] += char
+            self.delete_selection(self.focus)
+            value = self.focus.attributes.get("value", "")
+            cursor = getattr(self.focus, "cursor", len(value))
+            self.focus.attributes["value"] = value[:cursor] + char + value[cursor:]
+            self.focus.cursor = cursor + 1
+            self.render()
+
+    def backspace(self):
+        if self.focus:
+            if self.delete_selection(self.focus):
+                self.render()
+                return
+            value = self.focus.attributes.get("value", "")
+            cursor = getattr(self.focus, "cursor", len(value))
+            if cursor > 0:
+                self.focus.attributes["value"] = value[:cursor-1] + value[cursor:]
+                self.focus.cursor = cursor - 1
+                self.render()
+
+    def arrow_left(self, e):
+        if self.focus:
+            value = self.focus.attributes.get("value", "")
+            cursor = getattr(self.focus, "cursor", len(value))
+            if cursor > 0:
+                self.focus.cursor = cursor - 1
+                if e.state & 0x0001:
+                    if getattr(self.focus, "selection_start", None) is None:
+                        self.focus.selection_start = cursor
+                    self.focus.selection_end = self.focus.cursor
+                else:
+                    self.focus.selection_start = None
+                    self.focus.selection_end = None
+                self.render()
+
+    def arrow_right(self, e):
+        if self.focus:
+            value = self.focus.attributes.get("value", "")
+            cursor = getattr(self.focus, "cursor", len(value))
+            if cursor < len(value):
+                self.focus.cursor = cursor + 1
+                if e.state & 0x0001:
+                    if getattr(self.focus, "selection_start", None) is None:
+                        self.focus.selection_start = cursor
+                    self.focus.selection_end = self.focus.cursor
+                else:
+                    self.focus.selection_start = None
+                    self.focus.selection_end = None
+                self.render()
+
+    def enter(self):
+        if self.focus:
+             pass
+
+    def delete_selection(self, elt):
+        start_sel = getattr(elt, "selection_start", None)
+        end_sel = getattr(elt, "selection_end", None)
+        if start_sel is not None and end_sel is not None:
+            start = min(start_sel, end_sel)
+            end = max(start_sel, end_sel)
+            value = elt.attributes.get("value", "")
+            elt.attributes["value"] = value[:start] + value[end:]
+            elt.cursor = start
+            elt.selection_start = None
+            elt.selection_end = None
+            return True
+        return False
+
+    def copy(self):
+        if self.focus:
+            start_sel = getattr(self.focus, "selection_start", None)
+            end_sel = getattr(self.focus, "selection_end", None)
+            if start_sel is not None and end_sel is not None:
+                start = min(start_sel, end_sel)
+                end = max(start_sel, end_sel)
+                value = self.focus.attributes.get("value", "")
+                try:
+                    root = tkinter._default_root
+                    root.clipboard_clear()
+                    root.clipboard_append(value[start:end])
+                except:
+                    pass
+
+    def paste(self):
+        if self.focus:
+            try:
+                root = tkinter._default_root
+                text = root.clipboard_get()
+            except:
+                return
+            self.delete_selection(self.focus)
+            value = self.focus.attributes.get("value", "")
+            cursor = getattr(self.focus, "cursor", len(value))
+            self.focus.attributes["value"] = value[:cursor] + text + value[cursor:]
+            self.focus.cursor = cursor + len(text)
+            self.render()
+
+    def cut(self):
+        if self.focus:
+            self.copy()
+            self.delete_selection(self.focus)
             self.render()
 
     def submit_form(self, elt):
@@ -1040,7 +1247,18 @@ class InputLayout:
                 text = ""
 
         if self.node.is_focused:
-            cx = self.x + self.font.measure(text)
+            # Draw selection
+            start_sel = getattr(self.node, "selection_start", None)
+            end_sel = getattr(self.node, "selection_end", None)
+            if start_sel is not None and end_sel is not None:
+                start = min(start_sel, end_sel)
+                end = max(start_sel, end_sel)
+                start_x = self.x + self.font.measure(text[:start])
+                end_x = self.x + self.font.measure(text[:end])
+                cmds.append(DrawRect(Rect(start_x, self.y, end_x, self.y + self.height), "lightblue"))
+
+            cursor = getattr(self.node, "cursor", len(text))
+            cx = self.x + self.font.measure(text[:cursor])
             cmds.append(DrawLine(
                 cx, self.y, cx, self.y + self.height, "black", 1))
 
