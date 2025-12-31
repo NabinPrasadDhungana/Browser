@@ -10,6 +10,7 @@ INHERITED_PROPERTIES = {
     "color": "black",
     "text-align": "left",
 }
+COOKIE_JAR = {}
 
 class URL:
     def __init__(self, url):
@@ -92,6 +93,11 @@ class URL:
         if payload:
             length = len(payload.encode("utf8"))
             request += f"Content-Length: {length}\r\n"
+
+        if self.host in COOKIE_JAR:
+            cookie = COOKIE_JAR[self.host]
+            request += f"Cookie: {cookie}\r\n"
+
         request += "Connection: close\r\n"
         request += "User-Agent: Nabin\r\n"
         request += "\r\n"
@@ -100,16 +106,23 @@ class URL:
         s.send(request.encode("utf8"))
 
         response = s.makefile("r", encoding="utf8", newline="\r\n")
-
+        
         statusline = response.readline()
         version, status, explanation = statusline.split(" ", 2)
 
-        print(f"version: {version}, status: {status} and explanation: {explanation}")
-
+        response_headers = {}
         while True:
             line = response.readline()
             if line == "\r\n":
                 break
+            header, value = line.split(":", 1)
+            response_headers[header.casefold()] = value.strip()
+
+        if "set-cookie" in response_headers:
+            cookie = response_headers["set-cookie"]
+            COOKIE_JAR[self.host] = cookie
+
+        print(f"version: {version}, status: {status} and explanation: {explanation}")
 
         content = response.read()
         s.close()
