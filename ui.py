@@ -61,6 +61,13 @@ class JSContext:
         except dukpy.JSRuntimeError as e:
             print("Script", script, "crashed", e)
 
+    def XMLHttpRequest_send(self, method, url, body):
+        full_url = self.tab.url.resolve(url)
+        headers, out = full_url.request(self.tab.url, body)
+        if full_url.origin() != self.tab.url.origin():
+            raise Exception("Cross-origin XHR request not allowed")
+        return out
+
     def querySelectorAll(self, selector_text):
         selector = CSSParser(selector_text).selector()
         nodes = [node for node
@@ -562,6 +569,7 @@ class Tab:
     def load(self, url, payload=None, from_navigation=False):
         if not from_navigation:
             self.forward_history.clear()
+        headers, body = url.request(self.url, payload)
         self.history.append(url)
         self.url = url
         body = url.request(payload)
@@ -576,7 +584,7 @@ class Tab:
                    "href" in node.attributes:
                     try:
                         style_url = url.resolve(node.attributes["href"])
-                        body = style_url.request()
+                        header, body = style_url.request(url)
                         rules.extend(CSSParser(body).parse())
                     except:
                         continue
@@ -600,7 +608,7 @@ class Tab:
         for script in scripts:
             script_url = url.resolve(script)
             try:
-                body = script_url.request()
+                header, body = script_url.request(url)
             except:
                 continue
             self.js.run(script_url, body)

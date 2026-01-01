@@ -62,7 +62,10 @@ class URL:
             self.scheme = "about"
             self.path = "blank"
 
-    def request(self, payload=None):
+    def origin(self):
+        return self.scheme + "://" + self.host + ":" + str(self.port)
+
+    def request(self, referrer, payload=None):
         method = "POST" if payload else "GET"
         if self.scheme == "file":
             path = self.path
@@ -95,8 +98,13 @@ class URL:
             request += f"Content-Length: {length}\r\n"
 
         if self.host in COOKIE_JAR:
-            cookie = COOKIE_JAR[self.host]
-            request += f"Cookie: {cookie}\r\n"
+            cookie, params = COOKIE_JAR[self.host]
+            allow_cookie = True
+            if referrer and params.get("samesite", "none") == "lax":
+                if method != "GET":
+                    allow_cookie = self.host == referrer.host
+            if allow_cookie:
+                request += f"Cookie: {cookie}\r\n"
 
         request += "Connection: close\r\n"
         request += "User-Agent: Nabin\r\n"
@@ -120,7 +128,16 @@ class URL:
 
         if "set-cookie" in response_headers:
             cookie = response_headers["set-cookie"]
-            COOKIE_JAR[self.host] = cookie
+            params = {}
+            if ";" in cookie:
+                cookie, rest = cookie.split(";", 1)
+                for param in rest.split(";"):
+                    if '=' in param:
+                        param, value = param.split("=", 1)
+                    else:
+                        value = "true"
+                    params[param.strip().casefold()] = value.casefold()
+            COOKIE_JAR[self.host] = (cookie, params)
 
         print(f"version: {version}, status: {status} and explanation: {explanation}")
 

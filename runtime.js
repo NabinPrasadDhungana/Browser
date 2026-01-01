@@ -1,8 +1,9 @@
 LISTENERS = {}
 
 x = new XMLHttpRequest();
-x.open("GET", URL, false);
+x.open("GET", "http://localhost:8000/", false);
 x.send();
+user = x.responseText.split(" ")[2].split("<")[0];
 // use x.responseText
 
 console.log("Hi from JS!")

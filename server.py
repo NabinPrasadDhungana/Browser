@@ -27,9 +27,12 @@ def show_comments(session):
         out += "<p>" + entry + "\n"
         out += "<i>by " + who + "</i></p>"
     if "user" in session:
+        nonce = str(random.random())[2:]
+        session["nonce"] = nonce
         out += "<h1>Hello, " + session["user"] + "</h1>"
         out += "<form action=add method=post>"
         out +=   "<p><input name=guest></p>"
+        out +=   "<input name=nonce type=hidden value=" + nonce + ">"
         out +=   "<p><button>Sign the book!</button></p>"
         out += "</form>"
     else:
@@ -47,6 +50,8 @@ def form_decode(body):
 
 def add_entry(session, params):
     if "user" not in session: return
+    if "nonce" not in session or "nonce" not in params: return
+    if session["nonce"] != params["nonce"]: return
     if 'guest' in params and len(params['guest']) <= 100:
         ENTRIES.append((params['guest'], session["user"]))
     return show_comments(session)
@@ -127,7 +132,7 @@ def handle_connection(conx):
     response += f"Content-Length: {len(body.encode('utf8'))}\r\n"
     
     if "cookie" not in headers:
-        response += f"Set-Cookie: token={token}\r\n"
+        response += f"Set-Cookie: token={token}; SameSite=Lax\r\n"
     
     response += "\r\n" + body
     conx.send(response.encode('utf8'))
