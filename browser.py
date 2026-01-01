@@ -15,6 +15,8 @@ COOKIE_JAR = {}
 class URL:
     def __init__(self, url):
         self.fragment = None
+        self.host = None
+        self.port = None
         try:
             if url == "about:blank":
                 self.scheme = "about"
@@ -57,10 +59,11 @@ class URL:
                 self.host, port = self.host.split(':', 1)
                 self.port = int(port)
 
-            print(f"protocol is: {self.scheme}, host is: {self.host}, path is: {self.path}")
         except Exception:
             self.scheme = "about"
             self.path = "blank"
+            self.host = None
+            self.port = None
 
     def origin(self):
         if self.host is None:

@@ -151,8 +151,15 @@ class Chrome:
             self.back_rect.right + self.padding + forward_width,
             self.urlbar_bottom - self.padding)
 
-        self.address_rect = Rect(
+        reload_width = self.font.measure("R") + 2*self.padding
+        self.reload_rect = Rect(
             self.forward_rect.right + self.padding,
+            self.urlbar_top + self.padding,
+            self.forward_rect.right + self.padding + reload_width,
+            self.urlbar_bottom - self.padding)
+
+        self.address_rect = Rect(
+            self.reload_rect.right + self.padding,
             self.urlbar_top + self.padding,
             WIDTH - self.padding,
             self.urlbar_bottom - self.padding)
@@ -287,6 +294,8 @@ class Chrome:
             self.browser.active_tab.go_back()
         elif self.forward_rect.contains_point(x, y):
             self.browser.active_tab.go_forward()
+        elif self.reload_rect.contains_point(x, y):
+            self.browser.active_tab.reload()
         elif self.address_rect.contains_point(x, y):
             self.focus = "address bar"
             if not was_focused:
@@ -360,6 +369,13 @@ class Chrome:
             self.forward_rect.top,
             ">", self.font, forward_color))
         
+        # Draw reload button
+        cmds.append(DrawOutline(self.reload_rect, "black", 1))
+        cmds.append(DrawText(
+            self.reload_rect.left + self.padding,
+            self.reload_rect.top,
+            "R", self.font, "black"))
+
         cmds.append(DrawOutline(self.address_rect, "black", 1))
         
         if self.focus == "address bar":
@@ -678,6 +694,14 @@ class Tab:
         if len(self.forward_history) > 0:
             forward = self.forward_history.pop()
             self.load(forward, from_navigation=True)
+
+    def reload(self):
+        if not self.url:
+            return
+        # Avoid duplicating the current entry in history on reload
+        if self.history and self.history[-1] is self.url:
+            self.history.pop()
+        self.load(self.url, from_navigation=True)
 
     def draw(self, canvas, offset):
         for cmd in self.display_list:
