@@ -10,7 +10,6 @@ SESSIONS = {}
 LOGINS = {
     "crashoverride": "0cool",
     "cerealkiller": "emmanuel",
-    "": ""
 }
 
 s = socket.socket(
@@ -114,7 +113,6 @@ def handle_connection(conx):
     else:
         body = None
 
-    response = ""
     token = None
 
     if "cookie" in headers:
@@ -122,15 +120,15 @@ def handle_connection(conx):
     else:
         token = str(random.random())[2:]
 
-    if "cookie" not in headers:
-        template = "Set-Cookie: token={}\r\n"
-        response += template.format(token)
-
     session = SESSIONS.setdefault(token, {})
     status, body = do_request(session, method, url, headers, body)
 
     response = f"HTTP/1.0 {status}\r\n"
     response += f"Content-Length: {len(body.encode('utf8'))}\r\n"
+    
+    if "cookie" not in headers:
+        response += f"Set-Cookie: token={token}\r\n"
+    
     response += "\r\n" + body
     conx.send(response.encode('utf8'))
     conx.close()
