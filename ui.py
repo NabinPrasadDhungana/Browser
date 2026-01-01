@@ -53,6 +53,7 @@ class JSContext:
         self.interp.export_function("querySelectorAll", self.querySelectorAll)
         self.interp.export_function("getAttribute", self.getAttribute)
         self.interp.export_function("innerHTML_set", self.innerHTML_set)
+        self.interp.export_function("XMLHttpRequest_send", self.XMLHttpRequest_send)
         self.interp.evaljs(RUNTIME_JS)
 
     def run(self,script, code):
@@ -63,6 +64,8 @@ class JSContext:
 
     def XMLHttpRequest_send(self, method, url, body):
         full_url = self.tab.url.resolve(url)
+        if not self.tab.js.allowed_request(full_url):
+            raise Exception("Cross-origin XHR blocked by CSP")
         headers, out = full_url.request(self.tab.url, body)
         if full_url.origin() != self.tab.url.origin():
             raise Exception("Cross-origin XHR request not allowed")
@@ -565,6 +568,8 @@ class Tab:
         self.scroll = 0
         self.width = WIDTH
         self.focus = None
+        self.url = None
+        self.allowed_origins = None
 
     def load(self, url, payload=None, from_navigation=False):
         if not from_navigation:
@@ -572,9 +577,18 @@ class Tab:
         headers, body = url.request(self.url, payload)
         self.history.append(url)
         self.url = url
-        body = url.request(payload)
         self.nodes = HTMLParser(body).parse()
         rules = DEFAULT_STYLE_SHEET.copy()
+
+        if "content-security-policy" in headers:
+            csp = headers["content-security-policy"].split()
+            if len(csp) > 0 and csp[0] == "default-src":
+                self.allowed_origins = []
+                for origin in csp[1:]:
+                    if origin == "'self'":
+                        self.allowed_origins.append(url.origin())
+                    else:
+                        self.allowed_origins.append(URL(origin).origin())
 
         for node in tree_to_list(self.nodes, []):
             if isinstance(node, Element):
@@ -584,6 +598,8 @@ class Tab:
                    "href" in node.attributes:
                     try:
                         style_url = url.resolve(node.attributes["href"])
+                        if not self.allowed_request(style_url):
+                            continue
                         header, body = style_url.request(url)
                         rules.extend(CSSParser(body).parse())
                     except:
@@ -607,6 +623,8 @@ class Tab:
         self.js = JSContext(self)
         for script in scripts:
             script_url = url.resolve(script)
+            if not self.allowed_request(script_url):
+                continue
             try:
                 header, body = script_url.request(url)
             except:
@@ -616,6 +634,11 @@ class Tab:
         self.rules = rules
         self.render()
         self.scroll_to_fragment()
+
+    def allowed_request(self, target_url):
+        if self.allowed_origins is None:
+            return True
+        return target_url.origin() in self.allowed_origins
 
     def scroll_to_fragment(self):
         if not self.url.fragment:
@@ -1042,6 +1065,8 @@ class BlockLayout:
         self.cursor_x += w + font.measure(" ")
 
     def input(self, node):
+        if node.tag == "input" and node.attributes.get("type", "").casefold() == "hidden":
+            return
         w = INPUT_WIDTH_PX
         if self.cursor_x + w > self.width:
             self.new_line()

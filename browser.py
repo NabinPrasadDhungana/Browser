@@ -63,6 +63,8 @@ class URL:
             self.path = "blank"
 
     def origin(self):
+        if self.host is None:
+            return "null"
         return self.scheme + "://" + self.host + ":" + str(self.port)
 
     def request(self, referrer, payload=None):
@@ -71,17 +73,17 @@ class URL:
             path = self.path
             if os.path.isfile(path):
                 with open(path, "r", encoding="utf8") as f:
-                    return f.read()
+                    return {}, f.read()
             elif os.path.isdir(path):
-                return self.generate_directory_listing(path)
+                return {}, self.generate_directory_listing(path)
             else:
-                return f"<html><body><h1>Error</h1><p>Path not found: {path}</p></body></html>"
+                return {}, f"<html><body><h1>Error</h1><p>Path not found: {path}</p></body></html>"
         
         if self.scheme == "data":
-            return self.path.split(",", 1)[1]
+            return {}, self.path.split(",", 1)[1]
 
         if self.scheme == "about":
-            return ""
+            return {}, ""
 
         s = socket.socket()
 
@@ -139,12 +141,10 @@ class URL:
                     params[param.strip().casefold()] = value.casefold()
             COOKIE_JAR[self.host] = (cookie, params)
 
-        print(f"version: {version}, status: {status} and explanation: {explanation}")
-
         content = response.read()
         s.close()
 
-        return content
+        return response_headers, content
 
     def generate_directory_listing(self, path):
         path = os.path.abspath(path)
@@ -475,7 +475,6 @@ class HTMLParser:
         return self.unfinished.pop()
     
 def print_tree(node, indent=0):
-    print(" " * indent, node)
     for child in node.children:
         print_tree(child, indent + 2)
 

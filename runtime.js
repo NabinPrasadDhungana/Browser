@@ -1,9 +1,26 @@
 LISTENERS = {}
 
-x = new XMLHttpRequest();
-x.open("GET", "http://localhost:8000/", false);
-x.send();
-user = x.responseText.split(" ")[2].split("<")[0];
+function XMLHttpRequest() {}
+
+XMLHttpRequest.prototype.open = function(method, url, is_async) {
+    if (is_async) throw Error("Only synchronous XHR is supported");
+    this.method = method;
+    this.url = url;
+}
+
+XMLHttpRequest.prototype.send = function(body) {
+    this.responseText = call_python("XMLHttpRequest_send", this.method, this.url, body);
+}
+
+try {
+    x = new XMLHttpRequest();
+    x.open("GET", "http://localhost:8000/", false);
+    x.send();
+    user = x.responseText.split(" ")[2].split("<")[0];
+} catch (e) {
+    console.log("Could not load user: " + e);
+    user = "guest";
+}
 // use x.responseText
 
 console.log("Hi from JS!")
@@ -83,14 +100,3 @@ Event.prototype.preventDefault = function() {
     this.do_default = false;
 }
 
-function XMLHttpRequest() {}
-
-XMLHttpRequest.prototype.open = function(method, url, is_async) {
-    if (is_async) throw Error("Only synchronous XHR is supported");
-    this.method = method;
-    this.url = url;
-}
-
-XMLHttpRequest.prototype.send = function(body) {
-    this.responseText = call_python("XMLHttpRequest_send", this.method, this.url, body);
-}

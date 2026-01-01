@@ -1,15 +1,16 @@
 import socket
+import html
 import urllib.parse
 import random
 
 ENTRIES = [
-    ("No names. We are nameless!", "cerealkiller"),
-    ("HACK THE PLANET!!!", "crashoverride"),
+    ("No names. We are nameless!", "user1"),
+    ("Hello World", "user2"),
 ]
 SESSIONS = {}
 LOGINS = {
-    "crashoverride": "0cool",
-    "cerealkiller": "emmanuel",
+    "user2": "pass1",
+    "user1": "pass2",
 }
 
 s = socket.socket(
@@ -24,16 +25,20 @@ s.listen()
 def show_comments(session):
     out = "<!doctype html>"
     for entry, who in ENTRIES:
-        out += "<p>" + entry + "\n"
-        out += "<i>by " + who + "</i></p>"
+        out += "<p>" + html.escape(entry) + "\n"
+        out += "<i>by " + html.escape(who) + "</i></p>"
     if "user" in session:
-        nonce = str(random.random())[2:]
-        session["nonce"] = nonce
+        # Keep a stable nonce for the session so that extra GETs (e.g., XHR)
+        # don't invalidate the form value the user sees.
+        if "nonce" not in session:
+            session["nonce"] = str(random.random())[2:]
+        nonce = session["nonce"]
         out += "<h1>Hello, " + session["user"] + "</h1>"
         out += "<form action=add method=post>"
         out +=   "<p><input name=guest></p>"
         out +=   "<input name=nonce type=hidden value=" + nonce + ">"
         out +=   "<p><button>Sign the book!</button></p>"
+        out += "<script src=https://example.com/evil.js></script>"
         out += "</form>"
     else:
         out += "<a href=/login>Sign in to write in the guest book</a>"
@@ -49,9 +54,12 @@ def form_decode(body):
     return params
 
 def add_entry(session, params):
-    if "user" not in session: return
-    if "nonce" not in session or "nonce" not in params: return
-    if session["nonce"] != params["nonce"]: return
+    if "user" not in session:
+        return
+    if "nonce" not in session or "nonce" not in params:
+        return
+    if session["nonce"] != params["nonce"]:
+        return
     if 'guest' in params and len(params['guest']) <= 100:
         ENTRIES.append((params['guest'], session["user"]))
     return show_comments(session)
@@ -102,7 +110,14 @@ def do_login(session, params):
 def handle_connection(conx):
     req = conx.makefile("b")
     reqline = req.readline().decode("utf8")
-    method, url, version = reqline.split(" ", 2)
+    if not reqline:
+        conx.close()
+        return
+    parts = reqline.split(" ", 2)
+    if len(parts) != 3:
+        conx.close()
+        return
+    method, url, version = parts
     assert method in ["GET", "POST"]
     headers = {}
     while True:
@@ -130,6 +145,8 @@ def handle_connection(conx):
 
     response = f"HTTP/1.0 {status}\r\n"
     response += f"Content-Length: {len(body.encode('utf8'))}\r\n"
+    csp = "default-src http://localhost:8000"
+    response += "Content-Security-Policy: {}\r\n".format(csp)
     
     if "cookie" not in headers:
         response += f"Set-Cookie: token={token}; SameSite=Lax\r\n"
