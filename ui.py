@@ -630,7 +630,7 @@ class Tab:
                     if style_content:
                         rules.extend(CSSParser(style_content).parse())
 
-                # Handle textarea initial value
+                # Handle textarea input
                 elif node.tag == "textarea":
                     if not "value" in node.attributes:
                         text_content = ""
