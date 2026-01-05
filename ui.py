@@ -21,7 +21,13 @@ NAMED_COLORS = {
     "black": "#000000",
     "white": "#ffffff",
     "red":   "#ff0000",
-    # ...
+    "green": "#00ff00",
+    "blue":  "#0000ff",
+    "lightblue": "#add8e6",
+    "orange": "#ffa500",
+    "gray":  "#808080",
+    "grey":  "#808080",
+    "transparent": "#00000000",
 }
 
 def tree_to_list(tree, list):
@@ -44,6 +50,20 @@ def parse_font_size(font_size_str):
         elif unit == 'pt':
             return int(value)  # pt is roughly equivalent to pixels for fonts
     return 12  # fallback default size
+
+def parse_length(length_str):
+    """Parse length string and return size in pixels."""
+    import re
+    if length_str == "0": return 0
+    match = re.match(r'^([\d.]+)(px|rem|em|pt)?$', length_str)
+    if match:
+        value = float(match.group(1))
+        unit = match.group(2) or 'px'
+        if unit == 'px':
+            return int(value)
+        elif unit == 'rem' or unit == 'em':
+            return int(value * 16)
+    return 0
 
 def parse_font_weight(weight_str):
     """Convert CSS font-weight to tkinter weight (normal or bold)."""
@@ -316,8 +336,8 @@ class Chrome:
         cmds = []
         
         # Draw the URL bar background FIRST (only covers URL bar, not tabs)
-        cmds.append(DrawRect(
-            skia.Rect.MakeLTRB(0, self.urlbar_top, self.width, self.bottom), "white"))
+        cmds.append(DrawRRect(
+            skia.Rect.MakeLTRB(0, self.urlbar_top, self.width, self.bottom), 0, "white"))
         cmds.append(DrawLine(
             0, self.bottom, self.width, self.bottom, "black", 1))
         
@@ -381,7 +401,7 @@ class Chrome:
                 end = max(self.selection_start, self.selection_end)
                 start_x = self.address_rect.left() + self.padding + self.font.measureText(self.address_bar[:start])
                 end_x = self.address_rect.left() + self.padding + self.font.measureText(self.address_bar[:end])
-                cmds.append(DrawRect(skia.Rect.MakeLTRB(start_x, self.address_rect.top() + self.padding, end_x, self.address_rect.bottom() - self.padding), "lightblue"))
+                cmds.append(DrawRRect(skia.Rect.MakeLTRB(start_x, self.address_rect.top() + self.padding, end_x, self.address_rect.bottom() - self.padding), 0, "lightblue"))
 
             cmds.append(DrawText(
                 self.address_rect.left() + self.padding,
@@ -539,8 +559,25 @@ class Browser:
         self.draw()
 
     def handle_mousewheel(self, e):
-        self.active_tab.mousewheel(e)
+        if self.active_tab:
+            self.active_tab.mousewheel(e)
         self.draw()
+
+    def handle_mousedown(self, e):
+        if e.y < self.chrome.bottom:
+            pass
+        else:
+            self.focus = "content"
+            self.chrome.blur()
+            tab_y = e.y - self.chrome.bottom
+            self.active_tab.mousedown(e.x, tab_y)
+        self.draw()
+
+    def handle_mousemotion(self, e):
+        if self.active_tab and self.active_tab.scrolling:
+            tab_y = e.y - self.chrome.bottom
+            self.active_tab.mousemotion(e.x, tab_y)
+            self.draw()
 
     def handle_click(self, e):
         if e.y < self.chrome.bottom:
@@ -612,6 +649,7 @@ class Tab:
         self.focus = None
         self.url = None
         self.allowed_origins = None
+        self.scrolling = False
 
     def load(self, url, payload=None, from_navigation=False):
         if not from_navigation:
@@ -740,12 +778,15 @@ class Tab:
         self.load(self.url, from_navigation=True)
 
     def draw(self, canvas, offset):
+        canvas.save()
+        canvas.clipRect(skia.Rect.MakeLTRB(0, offset, self.width, offset + self.tab_height))
         for cmd in self.display_list:
             if cmd.rect.top() > self.scroll + self.tab_height: continue
             if cmd.rect.bottom() < self.scroll: continue
             cmd.execute(self.scroll - offset, canvas)
         
         self.draw_scrollbar(canvas, offset)
+        canvas.restore()
 
     def draw_scrollbar(self, canvas, offset):
         if not self.display_list:
@@ -776,13 +817,10 @@ class Tab:
     def mousewheel(self, e):
         if not self.display_list:
             return
-        if e.num == 4 or e.delta > 0:
-            if not self.scroll <=0:
-                self.scroll -= SCROLL_STEP
-        elif e.num == 5 or e.delta < 0:
-            max_y = self.display_list[-1].bottom
-            if self.scroll + self.tab_height < max_y:
-                self.scroll += SCROLL_STEP
+        if e.y > 0:
+            self.scrollup()
+        elif e.y < 0:
+            self.scrolldown()
 
     def resize(self, width, height):
         self.width = width
@@ -793,7 +831,35 @@ class Tab:
             self.display_list = []
             paint_tree(self.document, self.display_list)
 
+    def mousedown(self, x, y):
+        if not self.display_list: return
+        content_height = self.display_list[-1].bottom + VSTEP
+        if content_height <= self.tab_height: return
+        
+        scrollbar_width = 12
+        scrollbar_height = (self.tab_height / content_height) * self.tab_height
+        scrollbar_y = (self.scroll / content_height) * self.tab_height
+        
+        if self.width - scrollbar_width <= x <= self.width:
+            if scrollbar_y <= y <= scrollbar_y + scrollbar_height:
+                self.scrolling = True
+                self.scroll_start_y = y
+                self.scroll_start_scroll = self.scroll
+
+    def mousemotion(self, x, y):
+        if self.scrolling:
+            content_height = self.display_list[-1].bottom + VSTEP
+            dy = y - self.scroll_start_y
+            scroll_dy = dy * (content_height / self.tab_height)
+            self.scroll = self.scroll_start_scroll + scroll_dy
+            
+            max_y = max(content_height - self.tab_height, 0)
+            self.scroll = max(0, min(self.scroll, max_y))
+
     def click(self, x, y):
+        if self.scrolling:
+            self.scrolling = False
+            return
         if self.focus:
             self.focus.is_focused = False
         y += self.scroll
@@ -989,16 +1055,17 @@ class DrawText:
         canvas.drawString(self.text, float(self.rect.left()),
             baseline, self.font, paint)
     
-class DrawRect:
-    def __init__(self, rect, color):
+class DrawRRect:
+    def __init__(self, rect, radius, color):
         self.rect = rect
+        self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
         self.color = color
 
     def execute(self, scroll, canvas):
         paint = skia.Paint(
             Color=parse_color(self.color),
         )
-        canvas.drawRect(self.rect.makeOffset(0, -scroll), paint)
+        canvas.drawRRect(self.rrect.makeOffset(0, -scroll), paint)
 
 class BlockLayout:
     def __init__(self, node, parent, previous):
@@ -1068,8 +1135,16 @@ class BlockLayout:
 
     def recurse(self, node):
         if isinstance(node, Text):
-            for word in node.text.split():
-                self.word(node, word)
+            if isinstance(self.node, Element) and self.node.tag == "pre":
+                lines = node.text.split("\n")
+                for i, line in enumerate(lines):
+                    if line:
+                        self.word(node, line)
+                    if i < len(lines) - 1:
+                        self.new_line()
+            else:
+                for word in node.text.split():
+                    self.word(node, word)
         else:
             if node.tag in ["script", "style", "head", "title", "meta"]:
                 return
@@ -1089,13 +1164,15 @@ class BlockLayout:
         size = parse_font_size(node.style["font-size"])
         font = get_font(weight, style, size)
         w = font.measureText(word)
-        if self.cursor_x + w > self.width:
+        if self.cursor_x + w > self.width and not (isinstance(self.node, Element) and self.node.tag == "pre"):
             self.new_line()
         line = self.children[-1]
         previous_word = line.children[-1] if line.children else None
         text = TextLayout(node, word, line, previous_word, font, color)
         line.children.append(text)
-        self.cursor_x += w + font.measureText(" ")
+        self.cursor_x += w
+        if not (isinstance(self.node, Element) and self.node.tag == "pre"):
+            self.cursor_x += font.measureText(" ")
 
     def input(self, node):
         if node.tag == "input" and node.attributes.get("type", "").casefold() == "hidden":
@@ -1131,13 +1208,14 @@ class BlockLayout:
         cmds = []
         if isinstance(self.node, Element) and self.node.tag == "pre":
             x2, y2 = self.x + self.width, self.y + self.height
-            rect = DrawRect(self.self_rect(), "gray")
+            rect = DrawRRect(self.self_rect(), 0, "gray")
             cmds.append(rect)
 
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            rect = DrawRect(self.self_rect(), bgcolor)
+            radius = parse_length(self.node.style.get("border-radius", "0px"))
+            rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
         return cmds
@@ -1239,6 +1317,8 @@ class TextLayout:
         self.width = self.font.measureText(self.word)
         if self.previous:
             space = self.previous.font.measureText(" ")
+            if isinstance(self.parent.node, Element) and self.parent.node.tag == "pre":
+                space = 0
             self.x = self.previous.x + self.previous.width + space
         else:
             self.x = self.parent.x
@@ -1281,7 +1361,7 @@ class InputLayout:
         
         bgcolor = self.node.style.get("background-color", "transparent")
         if bgcolor != "transparent":
-            rect = DrawRect(self.self_rect(), bgcolor)
+            rect = DrawRRect(self.self_rect(), 0, bgcolor)
             cmds.append(rect)
 
         if self.node.tag == "input" or self.node.tag == "textarea":
@@ -1302,7 +1382,7 @@ class InputLayout:
                 end = max(start_sel, end_sel)
                 start_x = self.x + self.font.measureText(text[:start])
                 end_x = self.x + self.font.measureText(text[:end])
-                cmds.append(DrawRect(skia.Rect.MakeLTRB(start_x, self.y, end_x, self.y + self.height), "lightblue"))
+                cmds.append(DrawRRect(skia.Rect.MakeLTRB(start_x, self.y, end_x, self.y + self.height), 0, "lightblue"))
 
             cursor = getattr(self.node, "cursor", len(text))
             cx = self.x + self.font.measureText(text[:cursor])
@@ -1318,11 +1398,34 @@ def linespace(font):
     return metrics.fDescent - metrics.fAscent
     
 def parse_color(color):
-    if color.startswith("#") and len(color) == 7:
-        r = int(color[1:3], 16)
-        g = int(color[3:5], 16)
-        b = int(color[5:7], 16)
-        return skia.Color(r, g, b)
+    if color.startswith("#"):
+        if len(color) == 7:
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            return skia.Color(r, g, b)
+        elif len(color) == 9:
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            a = int(color[7:9], 16)
+            return skia.Color(r, g, b, a)
+        elif len(color) == 4:
+            r = int(color[1]*2, 16)
+            g = int(color[2]*2, 16)
+            b = int(color[3]*2, 16)
+            return skia.Color(r, g, b)
+    elif color.startswith("rgb"):
+        import re
+        match = re.match(r'rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)', color)
+        if match:
+            r = int(match.group(1))
+            g = int(match.group(2))
+            b = int(match.group(3))
+            a = 255
+            if match.group(4):
+                a = int(float(match.group(4)) * 255)
+            return skia.Color(r, g, b, a)
     elif color in NAMED_COLORS:
         return parse_color(NAMED_COLORS[color])
     else:
@@ -1338,6 +1441,12 @@ def mainloop(browser):
                 sys.exit()
             elif event.type == sdl2.SDL_MOUSEBUTTONUP:
                 browser.handle_click(event.button)
+            elif event.type == sdl2.SDL_MOUSEBUTTONDOWN:
+                browser.handle_mousedown(event.button)
+            elif event.type == sdl2.SDL_MOUSEMOTION:
+                browser.handle_mousemotion(event.motion)
+            elif event.type == sdl2.SDL_MOUSEWHEEL:
+                browser.handle_mousewheel(event.wheel)
             elif event.type == sdl2.SDL_WINDOWEVENT:
                 if event.window.event == sdl2.SDL_WINDOWEVENT_SIZE_CHANGED:
                     browser.handle_configure(event.window.data1, event.window.data2)
