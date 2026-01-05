@@ -630,6 +630,16 @@ class Tab:
                     if style_content:
                         rules.extend(CSSParser(style_content).parse())
 
+                # Handle textarea initial value
+                elif node.tag == "textarea":
+                    if not "value" in node.attributes:
+                        text_content = ""
+                        for child in node.children:
+                            if isinstance(child, Text):
+                                text_content += child.text
+                        node.attributes["value"] = text_content
+                        node.children = []
+
         scripts = [node.attributes["src"] for node
                    in tree_to_list(self.nodes, [])
                    if isinstance(node, Element)
@@ -778,7 +788,7 @@ class Tab:
                     return
                 url = self.url.resolve(href)
                 return self.load(url)
-            elif elt.tag == "input":
+            elif elt.tag == "input" or elt.tag == "textarea":
                 self.js.dispatch_event("click", elt)
                 self.focus = elt
                 elt.is_focused = True
@@ -906,7 +916,7 @@ class Tab:
         if self.js.dispatch_event("submit", elt): return
         inputs = [node for node in tree_to_list(elt, [])
                   if isinstance(node, Element)
-                  and node.tag == "input"
+                  and (node.tag == "input" or node.tag == "textarea")
                   and "name" in node.attributes]
         body = ""
         for input in inputs:
@@ -1023,7 +1033,7 @@ class BlockLayout:
             return "inline"
         elif any([isinstance(child, Element) and child.tag in BLOCK_ELEMENTS for child in self.node.children]):
             return "block"
-        elif self.node.children or self.node.tag == "input":
+        elif self.node.children or self.node.tag == "input" or self.node.tag == "textarea":
             return "inline"
         else:
             return "block"
@@ -1066,7 +1076,7 @@ class BlockLayout:
                 return
             if node.tag == "br":
                 self.new_line()
-            elif node.tag == "input" or node.tag == "button":
+            elif node.tag == "input" or node.tag == "button" or node.tag == "textarea":
                 self.input(node)
             else:
                 for child in node.children:
@@ -1131,7 +1141,7 @@ class BlockLayout:
 
     def should_paint(self):
         return isinstance(self.node, Text) or \
-            (self.node.tag != "input" and self.node.tag !=  "button")
+            (self.node.tag != "input" and self.node.tag !=  "button" and self.node.tag != "textarea")
 
     def paint(self):
         cmds = []
@@ -1295,7 +1305,7 @@ class InputLayout:
             rect = DrawRect(self.self_rect(), bgcolor)
             cmds.append(rect)
 
-        if self.node.tag == "input":
+        if self.node.tag == "input" or self.node.tag == "textarea":
             text = self.node.attributes.get("value", "")
         elif self.node.tag == "button":
             if len(self.node.children) == 1 and isinstance(self.node.children[0], Text):
