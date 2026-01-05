@@ -273,13 +273,21 @@ class CSSParser:
         self.i = 0
 
     def whitespace(self):
-        while self.i < len(self.s) and self.s[self.i].isspace():
-            self.i += 1
+        while self.i < len(self.s):
+            if self.s[self.i].isspace():
+                self.i += 1
+            elif self.s[self.i:self.i+2] == "/*":
+                self.i += 2
+                while self.i < len(self.s) and self.s[self.i:self.i+2] != "*/":
+                    self.i += 1
+                self.i += 2
+            else:
+                break
 
     def word(self):
         start = self.i
         while self.i < len(self.s):
-            if self.s[self.i].isalnum() or self.s[self.i] in "#-.%":
+            if self.s[self.i].isalnum() or self.s[self.i] in "#-.%_*":
                 self.i += 1
             else:
                 break
@@ -297,7 +305,14 @@ class CSSParser:
         self.whitespace()
         self.literal(":")
         self.whitespace()
-        val = self.word()
+        start = self.i
+        while self.i < len(self.s):
+            if self.s[self.i] == ";" or self.s[self.i] == "}":
+                break
+            self.i += 1
+        val = self.s[start:self.i].strip()
+        if val.lower().endswith("!important"):
+            val = val[:-10].strip()
         return prop.casefold(), val
     
     def body(self):
@@ -327,20 +342,72 @@ class CSSParser:
         return None
     
     def selector(self):
-        out = TagSelector(self.word().casefold())
+        out = self.parse_simple_selector(self.word().casefold())
         self.whitespace()
         while self.i < len(self.s) and self.s[self.i] != "{":
             tag = self.word()
-            descendant = TagSelector(tag.casefold())
+            descendant = self.parse_simple_selector(tag.casefold())
             out = DescendantSelector(out, descendant)
             self.whitespace()
         return out
-    
+
+    def parse_simple_selector(self, s):
+        # Parse a simple selector string like "div.cls#id"
+        # Returns a Selector object
+        
+        # Split by . and #, keeping delimiters
+        parts = []
+        current = ""
+        for char in s:
+            if char in [".", "#"]:
+                if current: parts.append(current)
+                current = char
+            else:
+                current += char
+        if current: parts.append(current)
+        
+        selectors = []
+        for part in parts:
+            if part.startswith("."):
+                selectors.append(ClassSelector(part[1:]))
+            elif part.startswith("#"):
+                selectors.append(IdSelector(part[1:]))
+            else:
+                selectors.append(TagSelector(part))
+        
+        if len(selectors) == 0:
+            return TagSelector("") # Should not happen if s is not empty
+        elif len(selectors) == 1:
+            return selectors[0]
+        else:
+            return CompoundSelector(selectors)
+
     def parse(self):
         rules = []
         while self.i < len(self.s):
             try:
                 self.whitespace()
+                if self.i >= len(self.s): break
+
+                if self.s[self.i] == "@":
+                    # Skip at-rule
+                    while self.i < len(self.s) and self.s[self.i] != ";":
+                        if self.s[self.i] == "{":
+                            # Skip block
+                            depth = 1
+                            self.i += 1
+                            while self.i < len(self.s) and depth > 0:
+                                if self.s[self.i] == "{":
+                                    depth += 1
+                                elif self.s[self.i] == "}":
+                                    depth -= 1
+                                self.i += 1
+                            break
+                        self.i += 1
+                    if self.i < len(self.s) and self.s[self.i] == ";":
+                        self.i += 1
+                    continue
+
                 selector = self.selector()
                 self.literal("{")
                 self.whitespace()
@@ -355,6 +422,32 @@ class CSSParser:
                 else:
                     break
         return rules
+
+class ClassSelector:
+    def __init__(self, classname):
+        self.classname = classname
+        self.priority = 10
+
+    def matches(self, node):
+        return isinstance(node, Element) and self.classname in node.attributes.get("class", "").split()
+
+class IdSelector:
+    def __init__(self, id):
+        self.id = id
+        self.priority = 100
+
+    def matches(self, node):
+        return isinstance(node, Element) and self.id == node.attributes.get("id", "")
+
+class CompoundSelector:
+    def __init__(self, simple_selectors):
+        self.simple_selectors = simple_selectors
+        self.priority = sum(s.priority for s in simple_selectors)
+
+    def matches(self, node):
+        for sel in self.simple_selectors:
+            if not sel.matches(node): return False
+        return True
     
 class TagSelector:
     def __init__(self, tag):
@@ -362,7 +455,7 @@ class TagSelector:
         self.priority = 1
 
     def matches(self, node):
-        return isinstance(node, Element) and self.tag == node.tag
+        return isinstance(node, Element) and (self.tag == node.tag or self.tag == "*")
     
 class DescendantSelector:
     def __init__(self, ancestor, descendant):
