@@ -5,6 +5,7 @@ import dukpy
 from browser import URL, HTMLParser, CSSParser, style, cascade_priority
 from browser import Text, Element
 import urllib.parse
+import math
 
 WIDTH = 800
 HEIGHT = 600 
@@ -489,6 +490,19 @@ class Browser:
         self.scroll = 0
         self.url = None
         self.chrome = Chrome(self)
+        self.chrome_surface = skia.Surface(WIDTH, math.ceil(self.chrome.bottom))
+        self.tab_surface = None
+
+    def raster_tab(self):
+        tab_height = math.ceil(self.active_tab.document.height + 2*VSTEP)
+        if not self.tab_surface or tab_height != self.tab_surface.height():
+            self.tab_surface = skia.Surface(WIDTH, tab_height)
+        canvas = self.tab_surface.getCanvas()
+        canvas.clear(skia.ColorWHITE)
+
+    def raster_chrome(self):
+        canvas = self.chrome_surface.getCanvas()
+        canvas.clear(skia.ColorWHITE)
 
     def handle_quit(self):
         sdl2.SDL_DestroyWindow(self.sdl_window)
@@ -583,11 +597,16 @@ class Browser:
         if e.y < self.chrome.bottom:
             self.focus = None
             self.chrome.click(e.x, e.y)
+            self.raster_chrome()
         else:
             self.focus = "content"
             self.chrome.blur()
+            url = self.active_tab.url
             tab_y = e.y - self.chrome.bottom
             self.active_tab.click(e.x, tab_y)
+            if self.active_tab.url != url:
+                self.raster_chrome()
+            self.raster_tab()
         self.draw()
 
     def handle_configure(self, width, height):
@@ -606,6 +625,20 @@ class Browser:
     def draw(self):
         canvas = self.root_surface.getCanvas()
         canvas.clear(skia.ColorWHITE)
+
+        tab_rect = skia.Rect.MakeLTRB(0, self.chrome.bottom, WIDTH, HEIGHT)
+        tab_offset = self.chrome.bottom - self.active_tab.scroll
+        canvas.save()
+        canvas.clipRect(tab_rect)
+        canvas.translate(0, tab_offset)
+        self.tab_surface.draw(canvas, 0, 0)
+        canvas.restore()
+
+        chrome_rect = skia.Rect.MakeLTRB(0, 0, WIDTH, self.chrome.bottom)
+        canvas.save()
+        canvas.clipRect(chrome_rect)
+        self.chrome_surface.draw(canvas, 0, 0)
+        canvas.restore()
         
         self.active_tab.draw(canvas, self.chrome.bottom)
         for cmd in self.chrome.paint():
@@ -778,12 +811,12 @@ class Tab:
         self.load(self.url, from_navigation=True)
 
     def draw(self, canvas, offset):
-        canvas.save()
-        canvas.clipRect(skia.Rect.MakeLTRB(0, offset, self.width, offset + self.tab_height))
+        # canvas.save()
+        # canvas.clipRect(skia.Rect.MakeLTRB(0, self.width + self.tab_height))
         for cmd in self.display_list:
-            if cmd.rect.top() > self.scroll + self.tab_height: continue
-            if cmd.rect.bottom() < self.scroll: continue
-            cmd.execute(self.scroll - offset, canvas)
+            # if cmd.rect.top() > self.scroll + self.tab_height: continue
+            # if cmd.rect.bottom() < self.scroll: continue
+            cmd.execute(canvas)
         
         self.draw_scrollbar(canvas, offset)
         canvas.restore()
@@ -1061,11 +1094,11 @@ class DrawRRect:
         self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
         self.color = color
 
-    def execute(self, scroll, canvas):
+    def execute(self, canvas):
         paint = skia.Paint(
             Color=parse_color(self.color),
         )
-        canvas.drawRRect(self.rrect.makeOffset(0, -scroll), paint)
+        canvas.drawRRect(self.rrect, paint)
 
 class BlockLayout:
     def __init__(self, node, parent, previous):
