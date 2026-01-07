@@ -434,6 +434,10 @@ class DrawLine:
         self.color = color
         self.thickness = thickness
 
+    @property
+    def bottom(self):
+        return self.rect.bottom()
+
     def execute(self, scroll, canvas):
         path = skia.Path().moveTo(
             self.rect.left(), self.rect.top() - scroll) \
@@ -451,6 +455,10 @@ class DrawOutline:
         self.rect = rect
         self.color = color
         self.thickness = thickness
+
+    @property
+    def bottom(self):
+        return self.rect.bottom()
 
     def execute(self, scroll, canvas):
         paint = skia.Paint(
@@ -670,6 +678,8 @@ class Browser:
         new_tab.load(url)
         self.active_tab = new_tab
         self.tabs.append(new_tab)
+        self.raster_tab()
+        self.raster_chrome()
         self.draw()
 
 class Tab:
@@ -811,14 +821,15 @@ class Tab:
         self.load(self.url, from_navigation=True)
 
     def draw(self, canvas, offset):
-        # canvas.save()
-        # canvas.clipRect(skia.Rect.MakeLTRB(0, self.width + self.tab_height))
+        canvas.save()
+        canvas.translate(0, offset)
+        canvas.clipRect(skia.Rect.MakeLTRB(0, 0, self.width, self.tab_height))
         for cmd in self.display_list:
-            # if cmd.rect.top() > self.scroll + self.tab_height: continue
-            # if cmd.rect.bottom() < self.scroll: continue
-            cmd.execute(canvas)
+            if cmd.rect.top() > self.scroll + self.tab_height: continue
+            if cmd.rect.bottom() < self.scroll: continue
+            cmd.execute(self.scroll, canvas)
         
-        self.draw_scrollbar(canvas, offset)
+        self.draw_scrollbar(canvas, 0)
         canvas.restore()
 
     def draw_scrollbar(self, canvas, offset):
@@ -1094,11 +1105,16 @@ class DrawRRect:
         self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
         self.color = color
 
-    def execute(self, canvas):
+    @property
+    def bottom(self):
+        return self.rect.bottom()
+
+    def execute(self, scroll, canvas):
         paint = skia.Paint(
             Color=parse_color(self.color),
         )
-        canvas.drawRRect(self.rrect, paint)
+        rrect = skia.RRect.MakeRectXY(self.rect.makeOffset(0, -scroll), self.rrect.radii(skia.RRect.kUpperLeft_Corner).x(), self.rrect.radii(skia.RRect.kUpperLeft_Corner).y())
+        canvas.drawRRect(rrect, paint)
 
 class BlockLayout:
     def __init__(self, node, parent, previous):
@@ -1237,6 +1253,10 @@ class BlockLayout:
         return isinstance(self.node, Text) or \
             (self.node.tag != "input" and self.node.tag !=  "button" and self.node.tag != "textarea")
 
+    def paint_effects(self, cmds):
+        cmds = paint_visual_effects(self.node, cmds, self.self_rect())
+        return cmds
+
     def paint(self):
         cmds = []
         if isinstance(self.node, Element) and self.node.tag == "pre":
@@ -1255,10 +1275,17 @@ class BlockLayout:
 
 def paint_tree(layout_object, display_list):
         if layout_object.should_paint():
-            display_list.extend(layout_object.paint())
+            cmds = layout_object.paint()
+        else:
+            cmds = []
 
         for child in layout_object.children:
-            paint_tree(child, display_list)
+            paint_tree(child, cmds)
+
+        if layout_object.should_paint():
+            cmds = layout_object.paint_effects(cmds)
+            
+        display_list.extend(cmds)
 
 class DocumentLayout:
     def __init__(self, node, width=WIDTH):
@@ -1281,6 +1308,9 @@ class DocumentLayout:
 
     def paint(self):
         return []
+
+    def paint_effects(self, cmds):
+        return cmds
     
 class LineLayout:
     def __init__(self, node, parent, previous):
@@ -1333,6 +1363,9 @@ class LineLayout:
     def paint(self):
         return []
 
+    def paint_effects(self, cmds):
+        return cmds
+
 class TextLayout:
     def __init__(self, node, word, parent, previous, font, color):
         self.node = node
@@ -1360,6 +1393,9 @@ class TextLayout:
 
     def paint(self):
         return [DrawText(self.x, self.y, self.word, self.font, self.color)]
+
+    def paint_effects(self, cmds):
+        return cmds
 
 class InputLayout:
     def __init__(self, node, parent, previous, font):
@@ -1425,7 +1461,84 @@ class InputLayout:
         color = self.node.style["color"]
         cmds.append(DrawText(self.x, self.y, text, self.font, color))
         return cmds
+
+    def paint_effects(self, cmds):
+        cmds = paint_visual_effects(self.node, cmds, self.self_rect())
+        return cmds
     
+class Opacity:
+    def __init__(self, opacity, children):
+        self.opacity = opacity
+        self.children = children
+        self.rect = skia.Rect.MakeEmpty()
+        for cmd in self.children:
+            self.rect.join(cmd.rect)
+
+    @property
+    def bottom(self):
+        return self.rect.bottom()
+
+    def execute(self, scroll, canvas):
+        paint = skia.Paint(Alphaf=self.opacity)
+        if self.opacity < 1.0:
+            canvas.saveLayer(None, paint)
+        for cmd in self.children:
+            cmd.execute(scroll, canvas)
+        if self.opacity < 1:
+            canvas.restore()
+
+class Blend:
+    def __init__(self, opacity, blend_mode, children):
+        self.blend_mode = blend_mode
+        self.opacity = opacity
+        self.should_save = self.blend_mode or self.opacity < 1
+
+        self.children = children
+        self.rect = skia.Rect.MakeEmpty()
+        for cmd in self.children:
+            self.rect.join(cmd.rect)
+
+    @property
+    def bottom(self):
+        return self.rect.bottom()
+
+    def execute(self, scroll, canvas):
+        paint = skia.Paint(
+            Alphaf=self.opacity,
+            BlendMode=parse_blend_mode(self.blend_mode),
+        )
+        if self.should_save:
+            canvas.saveLayer(None, paint)
+        for cmd in self.children:
+            cmd.execute(scroll, canvas)
+        if self.should_save:
+            canvas.restore()
+
+def parse_blend_mode(blend_mode_str):
+    if blend_mode_str == "multiply":
+        return skia.BlendMode.kMultiply
+    elif blend_mode_str == "difference":
+        return skia.BlendMode.kDifference
+    elif blend_mode_str == "destination-in":
+        return skia.BlendMode.kDstIn
+    elif blend_mode_str == "source-over":
+        return skia.BlendMode.kSrcOver
+    else:
+        return skia.BlendMode.kSrcOver
+
+def paint_visual_effects(node, cmds, rect):
+    opacity = float(node.style.get("opacity", "1.0"))
+    blend_mode = node.style.get("mix-blend-mode")
+    if node.style.get("overflow", "visible") == "clip":
+        if not blend_mode:
+            blend_mode = "source-over"
+        border_radius = float(node.style.get("border-radius", "0px")[:-2])
+        cmds.append(Blend(1.0, "destination-in", [
+            DrawRRect(rect, border_radius, "white")
+        ]))
+
+    return [Blend(opacity, blend_mode, cmds)]
+
 def linespace(font):
     metrics = font.getMetrics()
     return metrics.fDescent - metrics.fAscent
